@@ -1751,7 +1751,7 @@ lvgl:
                                         - button:
                                             id: lvgl_button_info_reboot_evse
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 16
+                                            grid_cell_row_pos: 9
                                             grid_cell_x_align: START
                                             height: 20
                                             width: 200

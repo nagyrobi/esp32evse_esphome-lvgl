@@ -30,7 +30,7 @@ Any other ESPHome supported graphical display could be used, the config file nee
 
 The display communicates with ESP32-EVSE via UART at 19200 baud rate. Enter your ESP32-EVSE web UI and in _Settings_ > _Serial_, select for the UART port _Mode_: _Nextion display_ and _Baud rate_: _19600_ then press Submit. Prepare a 4-pin cable with 2.5mm JST to 1.25mm JST ends wired correctly for RX/TX/GND/5V:
 
-| ESP32-EVSE U6 UART (1 leftmost looking from top) | Display P1 (1 closest to USB-C) |
+| ESP32-EVSE U6 UART (1 leftmost looking from top, 2.5mm JST) | Display P1 (1 closest to USB-C, 1.25mm JST) |
 | -------- | ------- |
 | 1: GND | 1: GND |
 | 2: TX | 2: RX |

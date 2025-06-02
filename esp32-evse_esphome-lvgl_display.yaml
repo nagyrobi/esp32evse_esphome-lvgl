@@ -116,7 +116,7 @@ touchscreen:
 uart:
   tx_pin: 43
   rx_pin: 44
-  baud_rate: 19600
+  baud_rate: 19200
   id: nxtn
   debug:
     direction: RX
@@ -226,7 +226,8 @@ uart:
           if (parse_number(msg, "curL1.val", num, 100.0f)) publish_if_changed(id(evse_current_l1), num);
           if (parse_number(msg, "curL2.val", num, 100.0f)) publish_if_changed(id(evse_current_l2), num);
           if (parse_number(msg, "curL3.val", num, 100.0f)) publish_if_changed(id(evse_current_l3), num);
-          if (parse_number(msg, "temp.val", num, 100.0f)) publish_if_changed(id(evse_temp_max), num);
+          if (parse_number(msg, "hiTemp.val", num, 100.0f)) publish_if_changed(id(evse_temp_hi), num);
+          if (parse_number(msg, "loTemp.val", num, 100.0f)) publish_if_changed(id(evse_temp_lo), num);
 
           // Fast updating diagnostic values need some throttling first
           if (parse_number(msg, "uptime.val", num)) id(evse_uptime_var) = num;
@@ -664,14 +665,28 @@ sensor:
 
   - platform: template
     name: ${friendly_name_evse} Temperature High
-    id: evse_temp_max
+    id: evse_temp_hi
     update_interval: never
     device_class: temperature
     unit_of_measurement: "°C"
     accuracy_decimals: 1
     on_value:
       - lvgl.label.update:
-          id: lvgl_label_info_temp
+          id: lvgl_label_info_temphi
+          text:
+            format: "%.1f °C"
+            args: [ 'x' ]
+
+  - platform: template
+    name: ${friendly_name_evse} Temperature Low
+    id: evse_temp_lo
+    update_interval: never
+    device_class: temperature
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    on_value:
+      - lvgl.label.update:
+          id: lvgl_label_info_templo
           text:
             format: "%.1f °C"
             args: [ 'x' ]
@@ -856,7 +871,7 @@ text_sensor:
           text: !lambda 'return x.c_str();'
 
   - platform: template
-    name: ${friendly_name_evse} State
+    name: ${friendly_name_evse} State (J1772)
     id: evse_state
     icon: mdi:ev-plug-type2
     on_value:
@@ -908,8 +923,8 @@ text_sensor:
           text: !lambda 'return x.c_str();'
 
   - platform: template
+    name: ${friendly_name_evse} State
     id: evse_charging_statusmsg
-    internal: true
     on_value:
       - lvgl.label.update:
           id: lvgl_label_charging_statusmsg
@@ -930,6 +945,15 @@ button:
     on_press:
       - uart.write: !lambda |-
           return std::vector<uint8_t>({'a','u','t','h', 0xFF, 0xFF, 0xFF});
+
+  - platform: template
+    name: ${friendly_name_evse} Reboot
+    id: evse_reboot
+    entity_category: config
+    icon: mdi:restart
+    on_press:
+      - uart.write: !lambda |-
+          return std::vector<uint8_t>({'r','e','b','o','o','t', 0xFF, 0xFF, 0xFF});
 
   # - platform: template
     # name: ${friendly_name_evse} Nextion Resubscribe
@@ -1632,6 +1656,7 @@ lvgl:
                                             grid_cell_column_pos: 1
                                             grid_cell_row_pos: 1
                                             grid_cell_x_align: END
+
                                         - label:
                                             text: "Temperature high"
                                             text_font: montserrat_16
@@ -1639,77 +1664,103 @@ lvgl:
                                             grid_cell_row_pos: 2
                                             grid_cell_x_align: START
                                         - label:
-                                            id: lvgl_label_info_temp
+                                            id: lvgl_label_info_temphi
                                             text: "- °C"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
                                             grid_cell_row_pos: 2
                                             grid_cell_x_align: END
                                         - label:
-                                            text: "Uptime"
+                                            text: "Temperature low"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
                                             grid_cell_row_pos: 3
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_templo
+                                            text: "- °C"
+                                            text_font: montserrat_16
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 3
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Uptime"
+                                            text_font: montserrat_16
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 4
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_uptime
                                             text: "- s"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 3
+                                            grid_cell_row_pos: 4
                                             grid_cell_x_align: END
                                         - label:
                                             text: "Version"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 4
+                                            grid_cell_row_pos: 5
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_fwevse
                                             text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 4
+                                            grid_cell_row_pos: 5
                                             grid_cell_x_align: END
                                         - label:
                                             text: "IP address"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 5
+                                            grid_cell_row_pos: 6
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_ipevse
                                             text: "-.-.-.-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 5
+                                            grid_cell_row_pos: 6
                                             grid_cell_x_align: END
                                         - label:
                                             text: "Heap"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 6
+                                            grid_cell_row_pos: 7
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_heapevse
                                             text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 6
+                                            grid_cell_row_pos: 7
                                             grid_cell_x_align: END
                                         - label:
                                             text: "Heap max"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 7
+                                            grid_cell_row_pos: 8
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_heapevse_max
                                             text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 7
+                                            grid_cell_row_pos: 8
                                             grid_cell_x_align: END
+                                        - button:
+                                            id: lvgl_button_info_reboot_evse
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 16
+                                            grid_cell_x_align: START
+                                            height: 20
+                                            width: 200
+                                            widgets:
+                                            - label:
+                                                align: CENTER
+                                                text: "Reboot ESP32-EVSE"
+                                            on_release:
+                                              - button.press: evse_reboot
                             - name: "Status"
                               text_align: CENTER
                               scrollable: FALSE

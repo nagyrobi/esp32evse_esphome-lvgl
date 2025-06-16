@@ -842,10 +842,10 @@ mapping:
     entries:
       A: EV not connected
       B1: EV connected
-      B2: EV connected
-      C1: Charging
+      B2: EV connected, authorized
+      C1: Ready to charge
       C2: Charging
-      D1: Charging with ventilation
+      D1: Ready to charge with ventilation
       D2: Charging with ventilation
       E: Connection error
       F: Error

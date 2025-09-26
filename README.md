@@ -2,7 +2,7 @@
 ## HMI for ESP32-EVSE based on ESPHome and LVGL
 
 This is a replacement Human-Machine Interface for the Nextion screen of the excellent [ESP32-EVSE project by Miroslav Dzúrik](https://github.com/dzurikmiroslav/esp32-evse).
-It is a plug and play replacement, as it relies on the original Nextion protocol implemented by the author. _Note:_ It doesn't implement the entire Nextion protocol, just the subset required by the EVSE.
+It relies on the [external ESPHoome component](https://github.com/nagyrobi/esp32evse-esphome) based AT commands protocol. 
 
 ![Screen](images/esp32-evse_esphome-lvgl.gif)
 
@@ -28,7 +28,11 @@ Any other ESPHome supported graphical display could be used, the config file nee
 
 ## Preparation
 
-The display communicates with ESP32-EVSE (min. version 1.2.0) via UART at 19200 baud rate. Enter your ESP32-EVSE web UI and in _Settings_ > _Serial_, select for the UART port _Mode_: _Nextion display_ and _Baud rate_: _19200_ then press Submit. Prepare a 4-pin cable with 2.5mm JST to 1.25mm JST ends wired correctly for RX/TX/GND/5V:
+The display communicates with ESP32-EVSE (min. version 2.0.0) via UART at 921600 baud rate. 
+Enter your ESP32-EVSE web UI and in _Settings_ > _Serial_, select for the UART port _Mode_: _AT Commands_. _Baud rate_: _921600_,  _Data bits_: _8_,  _Stop bits_: _1_, _Parity_: _Disable_. 
+Press Submit and reboot the evse from  _System_ > _Restart_.
+
+If you use the [esp32s2-evse-d-a board](https://github.com/dzurikmiroslav/esp32-evse/wiki/ESP32-S2-DA) you can use a 4-pin cable with 2.5mm JST wired correctly for RX/TX/GND/5V:
 
 | ESP32-EVSE U6 UART (1 leftmost looking from top, 2.5mm JST) | Display P1 (1 closest to USB-C, 1.25mm JST) |
 | -------- | ------- |

@@ -4,31 +4,23 @@ substitutions:
   friendly_name_evse: "Charge controller"
   device_description: "Guition JC3248w535"
 
+external_components:
+  - source:
+      type: git
+      url: https://github.com/nagyrobi/esp32evse-esphome
+    refresh: 1day
+    components: [ esp32evse ]
+
 esphome:
   name: ${device_name}
   comment: "${device_description}"
-  min_version: 2025.5.0
-  platformio_options:
-    upload_speed: 921600
-    board_build.flash_mode: dio
-    board_build.f_flash: 80000000L
-    board_build.f_cpu: 240000000L
-  on_boot:
-    - priority: -300
-      then:
-        - script.execute: nextion_subscribe
+  min_version: 2025.9.0
 
 esp32:
   board: esp32-s3-devkitc-1
   flash_size: 16MB
   framework:
     type: esp-idf
-    sdkconfig_options:
-      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: y
-      CONFIG_ESP32S3_DATA_CACHE_64KB: y
-      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: y
-      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: y
-      CONFIG_SPIRAM_RODATA: y
 
 logger:
   baud_rate: 0
@@ -110,267 +102,219 @@ touchscreen:
           then:
             - lvgl.resume:
             - lvgl.widget.redraw:
-            - light.turn_on:
-                id: display_backlight
-                transition_length: 300ms
+      - light.turn_on:
+          id: display_backlight
+          transition_length: 300ms
 
 uart:
+  id: evse_uart
   tx_pin: 43
   rx_pin: 44
-  baud_rate: 19200
-  id: nxtn
-  debug:
-    direction: RX
-    dummy_receiver: true
-    after:
-      delimiter: [0xFF, 0xFF, 0xFF]
-    sequence:
-      - lambda: |-
-          // Strip trailing 0xFFs
-          std::vector<uint8_t> clean_bytes = bytes;
-          while (!clean_bytes.empty() && clean_bytes.back() == 0xFF) {
-            clean_bytes.pop_back();
-          }
-          std::string msg(clean_bytes.begin(), clean_bytes.end());
+  baud_rate: 921600
+  stop_bits: 1
+  parity: NONE
 
-          // Helper to publish values only if changed
-          auto publish_if_changed = [](auto &component, auto new_val) {
-            using T = decltype(new_val);
-            static std::map<void*, bool> has_state_map;
+esp32evse:
+  id: evse
+  uart_id: evse_uart
 
-            void* ptr = static_cast<void*>(component);
-
-            if constexpr (std::is_same<T, float>::value) {
-              if (!std::isnan(new_val) && 
-                  (has_state_map[ptr] == false || std::isnan(component->state) || std::abs(component->state - new_val) > 0.0001f)) {
-                component->publish_state(new_val);
-                has_state_map[ptr] = true;
-              }
-            } else if constexpr (std::is_same<T, std::string>::value) {
-              if (!has_state_map[ptr] || component->state != new_val) {
-                component->publish_state(new_val);
-                has_state_map[ptr] = true;
-              }
-            } else { // bool, int, etc.
-              if (!has_state_map[ptr] || component->state != new_val) {
-                component->publish_state(new_val);
-                has_state_map[ptr] = true;
-              }
-            }
-          };
-
-          // Helper to extract string from text variable
-          auto extract_text = [](const std::string& msg, const std::string& prefix, std::string &out) -> bool {
-            size_t start = msg.find(prefix + "=\"");
-            if (start == 0) {
-              size_t end = msg.find("\"", prefix.length() + 2);
-              if (end != std::string::npos) {
-                out = msg.substr(prefix.length() + 2, end - (prefix.length() + 2));
-                return true;
-              }
-            }
-            return false;
-          };
-
-          // Helper to parse numeric variables
-          auto parse_number = [](const std::string& msg, const std::string& key, float &out, float divisor = 1.0f) -> bool {
-            if (msg.rfind(key + "=", 0) == 0) {
-              int val = atoi(msg.substr(key.length() + 1).c_str());
-              out = val / divisor;
-              return true;
-            }
-            return false;
-          };
-
-          std::string val;
-          float num = 0.0f;
-
-          // Text sensors
-          if (extract_text(msg, "state.txt", val)) publish_if_changed(id(evse_state), val);
-          if (extract_text(msg, "devName.txt", val)) publish_if_changed(id(evse_devname), val);
-          if (extract_text(msg, "appVer.txt", val)) publish_if_changed(id(evse_appver), val);
-          if (extract_text(msg, "ip.txt", val)) publish_if_changed(id(evse_ip), val);
-
-          // Switch
-          if (msg.rfind("en.val=", 0) == 0) {
-            bool on = msg[7] == '1';
-            publish_if_changed(id(evse_enable_charge), on);
-          }
-
-          // Binary sensors
-          if (msg.rfind("pendAuth.val=", 0) == 0) {
-            bool on = msg[13] == '1';
-            publish_if_changed(id(evse_pendauth), on);
-          }
-          if (msg.rfind("limReach.val=", 0) == 0) {
-            bool on = msg[13] == '1';
-            publish_if_changed(id(evse_limreach), on);
-          }
-
-          // Numbers
-          if (parse_number(msg, "chCur.val", num, 10.0f)) publish_if_changed(id(evse_charge_current), num);
-          if (parse_number(msg, "consumLim.val", num, 1000.0f)) publish_if_changed(id(evse_consumption_limit), num);
-          if (parse_number(msg, "chTimeLim.val", num, 60.0f)) publish_if_changed(id(evse_charge_time_limit), num);
-          if (parse_number(msg, "uPowerLim.val", num, 1000.0f)) publish_if_changed(id(evse_underpower_limit), num);
-
-          // Sensors
-          if (parse_number(msg, "err.val", num)) publish_if_changed(id(evse_error_code), num);
-          if (parse_number(msg, "maxChCur.val", num)) publish_if_changed(id(evse_max_charge_current), num);
-          if (parse_number(msg, "sesTime.val", num)) publish_if_changed(id(evse_session_time), num);
-          if (parse_number(msg, "chTime.val", num)) publish_if_changed(id(evse_charging_time), num);
-          if (parse_number(msg, "power.val", num)) publish_if_changed(id(evse_power), num);
-          if (parse_number(msg, "consum.val", num)) publish_if_changed(id(evse_session_consumption), num);
-          if (parse_number(msg, "totConsum.val", num)) publish_if_changed(id(evse_total_consumption), num);
-          if (parse_number(msg, "vltL1.val", num, 100.0f)) publish_if_changed(id(evse_voltage_l1), num);
-          if (parse_number(msg, "vltL2.val", num, 100.0f)) publish_if_changed(id(evse_voltage_l2), num);
-          if (parse_number(msg, "vltL3.val", num, 100.0f)) publish_if_changed(id(evse_voltage_l3), num);
-          if (parse_number(msg, "curL1.val", num, 100.0f)) publish_if_changed(id(evse_current_l1), num);
-          if (parse_number(msg, "curL2.val", num, 100.0f)) publish_if_changed(id(evse_current_l2), num);
-          if (parse_number(msg, "curL3.val", num, 100.0f)) publish_if_changed(id(evse_current_l3), num);
-          if (parse_number(msg, "hiTemp.val", num, 100.0f)) publish_if_changed(id(evse_temp_hi), num);
-          if (parse_number(msg, "loTemp.val", num, 100.0f)) publish_if_changed(id(evse_temp_lo), num);
-
-          // Fast updating diagnostic values need some throttling first
-          if (parse_number(msg, "uptime.val", num)) id(evse_uptime_var) = num;
-          if (parse_number(msg, "heap.val", num)) id(evse_heap_var) = num;
-          if (parse_number(msg, "maxHeap.val", num)) id(evse_heap_max_var) = num;
-
-          // Resubscribe when "rest" command is received, EVSE rebooted
-          if (msg == "rest") {
-            ESP_LOGD("uart", "Received 'rest' command, EVSE rebooted... Re-subscribing to Nextion data.");
-            id(nextion_subscribe).execute();
-          }
+mapping:
+  - id: j1772_state_map
+    from: string
+    to: string
+    entries:
+      A: EV not connected
+      B1: EV connected
+      B2: EV connected, authorized
+      C1: Ready to charge
+      C2: Charging
+      D1: Ready to charge with ventilation
+      D2: Charging with ventilation
+      E: Connection error
+      F: Error
 
 globals:
-  - id: evse_heap_var
-    type: int
-    restore_value: no
-    initial_value: '0'
-  - id: evse_heap_max_var
-    type: int
-    restore_value: no
-    initial_value: '0'
-  - id: evse_uptime_var
-    type: int
-    restore_value: no
-    initial_value: '0'
-
-script:
-  - id: nextion_subscribe
-    then:
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'u','n','s','u','b', 0xFF, 0xFF, 0xFF});
-      - delay: 2s
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','s','t','a','t','e', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','e','n', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','e','r','r', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','p','e','n','d','A','u','t','h', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','l','i','m','R','e','a','c','h', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','m','a','x','C','h','C','u','r', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','c','h','C','u','r', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','s','e','s','T','i','m','e', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','c','h','T','i','m','e', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','p','o','w','e','r', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','c','o','n','s','u','m', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','t','o','t','C','o','n','s','u','m', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','v','l','t','L','1', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','v','l','t','L','2', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','v','l','t','L','3', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','c','u','r','L','1', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','c','u','r','L','2', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','c','u','r','L','3', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','c','o','n','s','u','m','L','i','m', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','c','h','T','i','m','e','L','i','m', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','u','P','o','w','e','r','L','i','m', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','d','e','v','N','a','m','e', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','u','p','t','i','m','e', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','t','e','m','p', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','i','p', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','a','p','p','V','e','r', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','h','e','a','p', 0xFF, 0xFF, 0xFF});
-      - delay: 10ms
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'s','u','b',' ','m','a','x','H','e','a','p', 0xFF, 0xFF, 0xFF});
+  - id: var_evse_max_charge_current
+    type: float
+    restore_value: yes
+    initial_value: '32.0'
 
 sensor:
-  - platform: uptime
-    name: ${friendly_name} Uptime
-    disabled_by_default: false
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_info_uptime_disp
+  - platform: esp32evse
+    esp32evse_id: evse
+    temperature:
+      name: ${friendly_name_evse} Temperature High
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_temphi
+            text:
+              format: "%.1f °C"
+              args: [ 'x' ]
+    temperature_low:
+      name: ${friendly_name_evse} Temperature Low
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_templo
+            text:
+              format: "%.1f °C"
+              args: [ 'x' ]
+    emeter_power:
+      name: ${friendly_name_evse} Charging power
+      id: evse_power
+      on_value:
+        - lvgl.label.update:
+            id: 
+              - lvgl_label_charging_power
+              - lvgl_label_mains_power
+            text:
+              format: "%.1f kW"
+              args: [ 'x / 1000' ]
+    emeter_session_time:
+      name: ${friendly_name_evse} Session time
+      id: evse_session_time
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_charging_session_time
           text: !lambda |-
-            int total = (int)x;
-            auto format_duration = [](int total_seconds) -> std::string {
-              int days = total_seconds / 86400;
-              int hours = (total_seconds % 86400) / 3600;
-              int minutes = (total_seconds % 3600) / 60;
-              int seconds = total_seconds % 60;
-              if (total_seconds < 60) {
-                return std::to_string(seconds) + "s";
-              } else if (total_seconds < 3600) {
-                return std::to_string(minutes) + "m " + std::to_string(seconds) + "s";
-              } else if (total_seconds < 86400) {
-                return std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-              } else {
-                return std::to_string(days) + "d " + std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-              }
-            };
-            return format_duration(total);
+            if (x == 0) {
+                return "-";
+            } else {
+                int total = (int)x;
+                auto format_duration = [](int total_seconds) -> std::string {
+                  int days = total_seconds / 86400;
+                  int hours = (total_seconds % 86400) / 3600;
+                  int minutes = (total_seconds % 3600) / 60;
+                  int seconds = total_seconds % 60;
+                  if (total_seconds < 60) {
+                    return std::to_string(seconds) + "s";
+                  } else if (total_seconds < 3600) {
+                    return std::to_string(minutes) + "m " + std::to_string(seconds) + "s";
+                  } else if (total_seconds < 86400) {
+                    return std::to_string(hours) + "h " + std::to_string(minutes) + "m";
+                  } else {
+                    return std::to_string(days) + "d " + std::to_string(hours) + "h " + std::to_string(minutes) + "m";
+                  }
+                };
+                return format_duration(total);
+            }
+    emeter_charging_time:
+      name: ${friendly_name_evse} Charging time
+      id: evse_charging_time
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_charging_charging_time
+          text: !lambda |-
+            if (x == 0) {
+                return "-";
+            } else {
+                int total = (int)x;
+                auto format_duration = [](int total_seconds) -> std::string {
+                  int days = total_seconds / 86400;
+                  int hours = (total_seconds % 86400) / 3600;
+                  int minutes = (total_seconds % 3600) / 60;
+                  int seconds = total_seconds % 60;
+                  if (total_seconds < 60) {
+                    return std::to_string(seconds) + "s";
+                  } else if (total_seconds < 3600) {
+                    return std::to_string(minutes) + "m " + std::to_string(seconds) + "s";
+                  } else if (total_seconds < 86400) {
+                    return std::to_string(hours) + "h " + std::to_string(minutes) + "m";
+                  } else {
+                    return std::to_string(days) + "d " + std::to_string(hours) + "h " + std::to_string(minutes) + "m";
+                  }
+                };
+                return format_duration(total);
+            }
+    heap_used:
+      name: ${friendly_name_evse} Heap used
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_heapevse_used
+            text:
+              format: "%.0f B"
+              args: [ 'x' ]
+    heap_total:
+      name: ${friendly_name_evse} Heap total
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_heapevse_max
+            text:
+              format: "%.0f B"
+              args: [ 'x' ]
+    energy_consumption:
+      name: ${friendly_name_evse} Energy consumption
+      id: evse_session_consumption
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_charging_energy_consumed
+            text:
+              format: "%.1f kWh"
+              args: [ 'x / 1000' ]
+    total_energy_consumption:
+      name: ${friendly_name_evse} Energy total consumption
+      id: evse_total_consumption
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_total_energy
+            text:
+              format: "%.1f kWh"
+              args: [ 'x / 1000' ]
+    voltage_l1:
+      name: ${friendly_name_evse} L1 voltage
+      internal: true
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_mains_voltage_l1
+            text:
+              format: "%.2f \nV"
+              args: [ 'x' ]
+    voltage_l2:
+      name: ${friendly_name_evse} L2 voltage
+      internal: true
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_mains_voltage_l2
+            text:
+              format: "%.2f \nV"
+              args: [ 'x' ]
+    voltage_l3:
+      name: ${friendly_name_evse} L3 voltage
+      internal: true
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_mains_voltage_l3
+            text:
+              format: "%.2f \nV"
+              args: [ 'x' ]
+    current_l1:
+      name: ${friendly_name_evse} L1 current
+      internal: true
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_mains_current_l1
+            text:
+              format: "%.2f \nA"
+              args: [ 'x' ]
+    current_l2:
+      name: ${friendly_name_evse} L2 current
+      internal: true
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_mains_current_l2
+            text:
+              format: "%.2f \nA"
+              args: [ 'x' ]
+    current_l3:
+      name: ${friendly_name_evse} L3 current
+      internal: true
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_mains_current_l3
+            text:
+              format: "%.2f \nA"
+              args: [ 'x' ]
+    wifi_rssi:
+      name: ${friendly_name_evse} WiFi signal
 
   - platform: wifi_signal 
     name: ${friendly_name} WiFi signal
@@ -409,242 +353,12 @@ sensor:
               format: "%.0f ms"
               args: [ 'x' ]
 
-  - platform: template
-    name: ${friendly_name_evse} Maximum charging current
-    id: evse_max_charge_current
-    update_interval: never
-    unit_of_measurement: A
-    device_class: current
-
-  - platform: template
-    name: ${friendly_name_evse} Error bits
-    id: evse_error_code
-    update_interval: never
-    icon: mdi:alert-circle
-    accuracy_decimals: 0
-    entity_category: diagnostic
-    on_value:
-      then:
-        - lambda: |-
-            uint8_t flags = static_cast<uint8_t>(x);
-            id(evse_pilot_fault).publish_state(flags & (1 << 0));
-            id(evse_diode_short).publish_state(flags & (1 << 1));
-            id(evse_lock_fault).publish_state(flags & (1 << 2));
-            id(evse_unlock_fault).publish_state(flags & (1 << 3));
-            id(evse_rcm_triggered).publish_state(flags & (1 << 4));
-            id(evse_rcm_selftest_fault).publish_state(flags & (1 << 5));
-            id(evse_temp_high).publish_state(flags & (1 << 6));
-            id(evse_temp_fault).publish_state(flags & (1 << 7));
-
-  - platform: template
-    name: ${friendly_name_evse} Session time
-    id: evse_session_time
-    update_interval: never
-    unit_of_measurement: s
-    icon: mdi:clock-time-eight-outline
-    accuracy_decimals: 0
+  - platform: uptime
+    name: ${friendly_name} uptime
+    disabled_by_default: false
     on_value:
       - lvgl.label.update:
-          id: lvgl_label_charging_session_time
-          text: !lambda |-
-            if (x == 0) {
-                return "-";
-            } else {
-                int total = (int)x;
-                auto format_duration = [](int total_seconds) -> std::string {
-                  int days = total_seconds / 86400;
-                  int hours = (total_seconds % 86400) / 3600;
-                  int minutes = (total_seconds % 3600) / 60;
-                  int seconds = total_seconds % 60;
-                  if (total_seconds < 60) {
-                    return std::to_string(seconds) + "s";
-                  } else if (total_seconds < 3600) {
-                    return std::to_string(minutes) + "m " + std::to_string(seconds) + "s";
-                  } else if (total_seconds < 86400) {
-                    return std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-                  } else {
-                    return std::to_string(days) + "d " + std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-                  }
-                };
-                return format_duration(total);
-            }
-
-  - platform: template
-    name: ${friendly_name_evse} Charging time
-    id: evse_charging_time
-    update_interval: never
-    unit_of_measurement: s
-    icon: mdi:clock-time-eight-outline
-    accuracy_decimals: 0
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_charging_charging_time
-          text: !lambda |-
-            if (x == 0) {
-                return "-";
-            } else {
-                int total = (int)x;
-                auto format_duration = [](int total_seconds) -> std::string {
-                  int days = total_seconds / 86400;
-                  int hours = (total_seconds % 86400) / 3600;
-                  int minutes = (total_seconds % 3600) / 60;
-                  int seconds = total_seconds % 60;
-                  if (total_seconds < 60) {
-                    return std::to_string(seconds) + "s";
-                  } else if (total_seconds < 3600) {
-                    return std::to_string(minutes) + "m " + std::to_string(seconds) + "s";
-                  } else if (total_seconds < 86400) {
-                    return std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-                  } else {
-                    return std::to_string(days) + "d " + std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-                  }
-                };
-                return format_duration(total);
-            }
-
-  - platform: template
-    name: ${friendly_name_evse} Charging power
-    id: evse_power
-    update_interval: never
-    device_class: power
-    unit_of_measurement: W
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_charging_power
-          text:
-            format: "%.1f kW"
-            args: [ 'x / 1000' ]
-
-  - platform: template
-    name: ${friendly_name_evse} Energy consumption
-    id: evse_session_consumption
-    update_interval: never
-    device_class: energy
-    state_class: total_increasing
-    unit_of_measurement: Wh
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_charging_energy_consumed
-          text:
-            format: "%.1f kWh"
-            args: [ 'x / 1000' ]
-
-  - platform: template
-    name: ${friendly_name_evse} Energy total consumption
-    id: evse_total_consumption
-    update_interval: never
-    device_class: energy
-    state_class: total
-    unit_of_measurement: Wh
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_info_total_energy
-          text:
-            format: "%.1f kWh"
-            args: [ 'x / 1000' ]
-
-  - platform: template
-    name: ${friendly_name_evse} L1 voltage
-    id: evse_voltage_l1
-    update_interval: never
-    device_class: voltage
-    unit_of_measurement: V
-    internal: true
-    accuracy_decimals: 2
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_mains_voltage_l1
-          text:
-            format: "%.2f \nV"
-            args: [ 'x' ]
-
-  - platform: template
-    name: ${friendly_name_evse} L2 voltage
-    id: evse_voltage_l2
-    update_interval: never
-    device_class: voltage
-    unit_of_measurement: V
-    internal: true
-    accuracy_decimals: 2
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_mains_voltage_l2
-          text:
-            format: "%.2f \nV"
-            args: [ 'x' ]
-
-  - platform: template
-    name: ${friendly_name_evse} L3 voltage
-    id: evse_voltage_l3
-    update_interval: never
-    device_class: voltage
-    unit_of_measurement: V
-    internal: true
-    accuracy_decimals: 2
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_mains_voltage_l3
-          text:
-            format: "%.2f \nV"
-            args: [ 'x' ]
-
-  - platform: template
-    name: ${friendly_name_evse} L1 current
-    id: evse_current_l1
-    update_interval: never
-    device_class: current
-    unit_of_measurement: A
-    internal: true
-    accuracy_decimals: 2
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_mains_current_l1
-          text:
-            format: "%.2f \nA"
-            args: [ 'x' ]
-
-  - platform: template
-    name: ${friendly_name_evse} L2 current
-    id: evse_current_l2
-    update_interval: never
-    device_class: current
-    unit_of_measurement: A
-    internal: true
-    accuracy_decimals: 2
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_mains_current_l2
-          text:
-            format: "%.2f \nA"
-            args: [ 'x' ]
-
-  - platform: template
-    name: ${friendly_name_evse} L3 current
-    id: evse_current_l3
-    update_interval: never
-    device_class: current
-    unit_of_measurement: A
-    internal: true
-    accuracy_decimals: 2
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_mains_current_l3
-          text:
-            format: "%.2f \nA"
-            args: [ 'x' ]
-
-  - platform: template
-    name: ${friendly_name_evse} Uptime
-    id: evse_uptime
-    lambda: return id(evse_uptime_var);
-    update_interval: 60s
-    unit_of_measurement: "s"
-    entity_category: diagnostic
-    icon: mdi:timer-outline
-    accuracy_decimals: 0
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_info_uptime
+          id: lvgl_label_info_uptime_disp
           text: !lambda |-
             int total = (int)x;
             auto format_duration = [](int total_seconds) -> std::string {
@@ -664,65 +378,37 @@ sensor:
             };
             return format_duration(total);
 
-  - platform: template
-    name: ${friendly_name_evse} Temperature High
-    id: evse_temp_hi
-    update_interval: never
-    device_class: temperature
-    unit_of_measurement: "°C"
-    accuracy_decimals: 1
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_info_temphi
-          text:
-            format: "%.1f °C"
-            args: [ 'x' ]
+  # - platform: template
+    # name: ${friendly_name_evse} Uptime
+    # id: evse_uptime
+    # lambda: return id(evse_uptime_var);
+    # update_interval: 60s
+    # unit_of_measurement: "s"
+    # entity_category: diagnostic
+    # icon: mdi:timer-outline
+    # accuracy_decimals: 0
+    # on_value:
+      # - lvgl.label.update:
+          # id: lvgl_label_info_uptime
+          # text: !lambda |-
+            # int total = (int)x;
+            # auto format_duration = [](int total_seconds) -> std::string {
+              # int days = total_seconds / 86400;
+              # int hours = (total_seconds % 86400) / 3600;
+              # int minutes = (total_seconds % 3600) / 60;
+              # int seconds = total_seconds % 60;
+              # if (total_seconds < 60) {
+                # return std::to_string(seconds) + "s";
+              # } else if (total_seconds < 3600) {
+                # return std::to_string(minutes) + "m " + std::to_string(seconds) + "s";
+              # } else if (total_seconds < 86400) {
+                # return std::to_string(hours) + "h " + std::to_string(minutes) + "m";
+              # } else {
+                # return std::to_string(days) + "d " + std::to_string(hours) + "h " + std::to_string(minutes) + "m";
+              # }
+            # };
+            # return format_duration(total);
 
-  - platform: template
-    name: ${friendly_name_evse} Temperature Low
-    id: evse_temp_lo
-    update_interval: never
-    device_class: temperature
-    unit_of_measurement: "°C"
-    accuracy_decimals: 1
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_info_templo
-          text:
-            format: "%.1f °C"
-            args: [ 'x' ]
-
-  - platform: template
-    name: ${friendly_name_evse} Heap used
-    id: evse_heap
-    lambda: return id(evse_heap_var);
-    update_interval: 60s
-    device_class: data_size
-    accuracy_decimals: 0
-    unit_of_measurement: "B"
-    entity_category: diagnostic
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_info_heapevse
-          text:
-            format: "%.0f B"
-            args: [ 'x' ]
-
-  - platform: template
-    name: ${friendly_name_evse} Heap max
-    id: evse_heap_max
-    lambda: return id(evse_heap_max_var);
-    update_interval: 60s
-    device_class: data_size
-    accuracy_decimals: 0
-    unit_of_measurement: "B"
-    entity_category: diagnostic
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_info_heapevse_max
-          text:
-            format: "%.0f B"
-            args: [ 'x' ]
 
 binary_sensor:
   - platform: status
@@ -733,27 +419,26 @@ binary_sensor:
           id: lvgl_label_info_disp_api_connected
           text: !lambda 'return std::string(x ? "Yes" : "No");'
 
-  - platform: template
-    name: ${friendly_name_evse} Pending authorization
-    id: evse_pendauth
-    filters:
-      - delayed_on: 1500ms
-    on_press:
-      - if:
-          condition:
-            lambda: 'return id(evse_error_code).state == 0;'
-          then:
-            - lvgl.widget.show: lvgl_authorize_popup_window
-    on_release:
-      - lvgl.widget.hide: lvgl_authorize_popup_window
-    
-  - platform: template
-    name: ${friendly_name_evse} Charging limit reached
-    id: evse_limreach
-    on_press:
-      - text_sensor.template.publish:
-          id: evse_charging_statusmsg
-          state: "Charging limit reached"
+
+  - platform: esp32evse
+    esp32evse_id: evse
+    pending_authorization:
+      name: ${friendly_name_evse} Pending authorization
+      on_press:
+        - lvgl.widget.show: lvgl_authorize_popup_window
+      on_release:
+        - lvgl.widget.hide: lvgl_authorize_popup_window
+    wifi_connected:
+      name: ${friendly_name_evse} WiFi connected
+
+
+  # - platform: template
+    # name: ${friendly_name_evse} Charging limit reached
+    # id: evse_limreach
+    # on_press:
+      # - text_sensor.template.publish:
+          # id: evse_charging_statusmsg
+          # state: "Charging limit reached"
 
   - platform: template
     name: ${friendly_name_evse} Pilot Fault
@@ -835,22 +520,91 @@ binary_sensor:
           id: lvgl_label_info_temp_fault
           text: !lambda 'return std::string(x ? "Error" : "OK");'
 
-mapping:
-  - id: j1772_state_map
-    from: string
-    to: string
-    entries:
-      A: EV not connected
-      B1: EV connected
-      B2: EV connected, authorized
-      C1: Ready to charge
-      C2: Charging
-      D1: Ready to charge with ventilation
-      D2: Charging with ventilation
-      E: Connection error
-      F: Error
-
 text_sensor:
+  - platform: esp32evse
+    esp32evse_id: evse
+    state:
+      name: ${friendly_name_evse} State (J1772)
+      id: evse_state
+      on_value:
+        - text_sensor.template.publish:
+            id: evse_charging_statusmsg
+            state: !lambda return id(j1772_state_map)[x];
+        - lvgl.label.update:
+            id: lvgl_label_info_statusmsg
+            text: !lambda |-
+              return x + " (" + id(j1772_state_map)[x] + ")";
+        - if:
+            condition:
+              all:
+                - lambda: |-
+                    return x == "B1";
+                - switch.is_on: evse_reqauth
+            then:
+              - esp32evse.pending_authorization.subscribe: 500ms
+            else:
+              - esp32evse.pending_authorization.subscribe: never
+        - if:
+            condition:
+              lambda: |-
+                return x == "C1" || x == "C2" || x == "D1" || x == "D2";
+            then:
+              - esp32evse.emeter_power.subscribe: 1s
+              - esp32evse.emeter_session_time.subscribe: 1s
+              - esp32evse.emeter_charging_time.subscribe: 1s
+              - esp32evse.energy_consumption.subscribe: 2s
+              - esp32evse.voltage.subscribe: 2s
+              - esp32evse.current.subscribe: 2s
+            else:
+              - delay: 5s
+              - esp32evse.emeter_power.subscribe: never
+              - esp32evse.emeter_session_time.subscribe: never
+              - esp32evse.emeter_charging_time.subscribe: never
+              - esp32evse.energy_consumption.subscribe: never
+              - esp32evse.voltage.subscribe: never
+              - esp32evse.current.subscribe: never
+        - if:
+            condition:
+              lambda: 'return (x != "A");'
+            then:
+              - lvgl.resume:
+              - lvgl.widget.redraw:
+              - light.turn_on:
+                  id: display_backlight
+                  transition_length: 300ms
+
+
+    device_name:
+      name: ${friendly_name_evse}  Device name
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_devname
+            text: !lambda 'return x.c_str();'
+    version:
+      name: ${friendly_name_evse} Version
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_fwevse
+            text: !lambda 'return x.c_str();'
+    chip:
+      name: ${friendly_name_evse} MCU
+    idf_version:
+      name: ${friendly_name_evse} IDF version
+    build_time:
+      name: ${friendly_name_evse} Build date
+    device_time:
+      name: ${friendly_name_evse} Clock
+    wifi_sta_ssid:
+      name: ${friendly_name_evse} SSID
+    wifi_sta_ip:
+      name: ${friendly_name_evse} IP Address
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_ipevse
+            text: !lambda 'return x.c_str();'
+    wifi_sta_mac:
+      name: ${friendly_name_evse} MAC cím
+
   - platform: wifi_info
     ip_address:
       name: ${friendly_name} IP Address
@@ -861,290 +615,159 @@ text_sensor:
             id: lvgl_label_info_ipdisp
             text: !lambda 'return x.c_str();'
 
-  - platform: version
-    name: ${friendly_name} Version
-    entity_category: diagnostic
-    icon: mdi:chip
-    hide_timestamp: true
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_info_fwdisp
-          text: !lambda 'return x.c_str();'
-
-  - platform: template
-    name: ${friendly_name_evse} State (J1772)
-    id: evse_state
-    icon: mdi:ev-plug-type2
-    on_value:
-      - text_sensor.template.publish:
-          id: evse_charging_statusmsg
-          state: !lambda return id(j1772_state_map)[x];
-      - lvgl.label.update:
-          id: lvgl_label_info_statusmsg
-          text: !lambda |-
-            return x + " (" + id(j1772_state_map)[x] + ")";
-      - if:
-          condition:
-            lambda: 'return (x != "A");'
-          then:
-            - lvgl.resume:
-            - lvgl.widget.redraw:
-            - light.turn_on:
-                id: display_backlight
-                transition_length: 300ms
-
-  - platform: template
-    name: ${friendly_name_evse} Device name
-    id: evse_devname
-    entity_category: diagnostic
-    icon: mdi:label-outline
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_info_devname
-          text: !lambda 'return x.c_str();'
-
-  - platform: template
-    name: ${friendly_name_evse} Version
-    id: evse_appver
-    entity_category: diagnostic
-    icon: mdi:chip
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_info_fwevse
-          text: !lambda 'return x.c_str();'
-
-  - platform: template
-    name: ${friendly_name_evse} IP Address
-    id: evse_ip
-    entity_category: diagnostic
-    icon: mdi:ip
-    on_value:
-      - lvgl.label.update:
-          id: lvgl_label_info_ipevse
-          text: !lambda 'return x.c_str();'
-
   - platform: template
     name: ${friendly_name_evse} State
     id: evse_charging_statusmsg
+    icon: mdi:ev-station
     on_value:
       - lvgl.label.update:
           id: lvgl_label_charging_statusmsg
           text: !lambda 'return x.c_str();'
 
 button:
+  - platform: esp32evse
+    esp32evse_id: evse
+    reset:
+      name: ${friendly_name_evse} Restart
+      id: evse_restart
+    authorize:
+      name: ${friendly_name_evse} Authorize charging
+      id: evse_auhorize_charging
+
   - platform: restart
-    name: ${friendly_name} reboot
+    name: ${friendly_name} Restart
   - platform: factory_reset
     name: ${friendly_name} factory reset
   - platform: safe_mode
     name: ${friendly_name} safe mode
 
-  - platform: template
-    name: ${friendly_name_evse} Authorize charging
-    id: evse_auhorize_charging
-    icon: mdi:flash-red-eye
-    on_press:
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'a','u','t','h', 0xFF, 0xFF, 0xFF});
-
-  - platform: template
-    name: ${friendly_name_evse} Reboot
-    id: evse_reboot
-    entity_category: config
-    icon: mdi:restart
-    on_press:
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'r','e','b','o','o','t', 0xFF, 0xFF, 0xFF});
-
-  # - platform: template
-    # name: ${friendly_name_evse} Nextion Resubscribe
-    # entity_category: diagnostic
-    # on_press:
-      # - script.execute: nextion_subscribe
-
-  # - platform: template
-    # name: ${friendly_name_evse} Nextion Unsubscribe
-    # entity_category: diagnostic
-    # on_press:
-      # - uart.write: !lambda |-
-          # return std::vector<uint8_t>({'u','n','s','u','b', 0xFF, 0xFF, 0xFF});
-
 switch:
-  - platform: template
-    name: ${friendly_name_evse} Enable charging
-    id: evse_enable_charge
-    optimistic: true
-    restore_mode: DISABLED
-    turn_on_action:
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'e','n',' ','1', 0xFF, 0xFF, 0xFF});
-    turn_off_action:
-      - uart.write: !lambda |-
-          return std::vector<uint8_t>({'e','n',' ','0', 0xFF, 0xFF, 0xFF});
-    on_turn_on:
-      - lvgl.widget.update:
-          id: lvgl_switch_charging
-          state:
-            checked: true
-      - lvgl.label.update:
-          id: lvgl_label_charging_enabled
-          text: "Enabled"
-    on_turn_off:
-      - lvgl.widget.update:
-          id: lvgl_switch_charging
-          state:
-            checked: false
-      - lvgl.label.update:
-          id: lvgl_label_charging_enabled
-          text: "Disabled"
+  - platform: esp32evse
+    esp32evse_id: evse
+    enable:
+      name: ${friendly_name_evse} Enable charging
+      id: evse_enable_charge
+      on_turn_on:
+        - lvgl.widget.update:
+            id: lvgl_switch_charging
+            state:
+              checked: true
+        - lvgl.label.update:
+            id: lvgl_label_charging_enabled
+            text: "Enabled"
+      on_turn_off:
+        - lvgl.widget.update:
+            id: lvgl_switch_charging
+            state:
+              checked: false
+        - lvgl.label.update:
+            id: lvgl_label_charging_enabled
+            text: "Disabled"
+    available:
+      name: ${friendly_name_evse} available
+    request_authorization:
+      id: evse_reqauth
+      name: ${friendly_name_evse} require authorization
 
 number:
-  - platform: template
-    name: ${friendly_name_evse} Charging current
-    id: evse_charge_current
-    optimistic: true
-    unit_of_measurement: A
-    device_class: current
-    min_value: 6
-    max_value: 32
-    step: 0.1
-    mode: box
-    set_action:
-      - uart.write: !lambda |-
-          int val = static_cast<int>(x * 10.0f);
-          std::string cmd = "chCur " + to_string(val);
-          std::vector<uint8_t> data(cmd.begin(), cmd.end());
-          data.push_back(0xFF);
-          data.push_back(0xFF);
-          data.push_back(0xFF);
-          return data;
-    on_value:
-      - lvgl.slider.update:
-          id: lvgl_slider_charging_current
-          value: !lambda |-
-            // Normalizing slider scale to 6 -> maxChCur
-            float min_amps = 6.0;
-            float max_amps = id(evse_max_charge_current).state;
-            if (max_amps < min_amps) max_amps = min_amps;
-            float percent = (x - min_amps) / (max_amps - min_amps);
-            if (percent < 0) percent = 0;
-            if (percent > 1) percent = 1;
-            int slider_val = (int)(percent * 100);
-            return slider_val;
-      - lvgl.label.update:
-          id: lvgl_label_charging_current
-          text:
-            format: "%.1f A"
-            args: [ 'x' ]
+  - platform: esp32evse
+    esp32evse_id: evse
+    charging_current:
+      name: ${friendly_name_evse} Charging current
+      id: evse_charge_current
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_slider_charging_current
+            value: !lambda |-
+              // Normalizing slider scale to 6 -> maxChCur
+              float min_amps = 6.0;
+              float max_amps = id(var_evse_max_charge_current);
+              if (max_amps < min_amps) max_amps = min_amps;
+              float percent = (x - min_amps) / (max_amps - min_amps);
+              if (percent < 0) percent = 0;
+              if (percent > 1) percent = 1;
+              int slider_val = (int)(percent * 100);
+              return slider_val;
+        - lvgl.label.update:
+            id: lvgl_label_charging_current
+            text:
+              format: "%.1f A"
+              args: [ 'x' ]
 
-  - platform: template
-    name: ${friendly_name_evse} Energy consumption limit
-    id: evse_consumption_limit
-    optimistic: true
-    unit_of_measurement: kWh
-    device_class: energy
-    min_value: 0
-    max_value: 50
-    step: 0.1
-    mode: box
-    set_action:
-      - uart.write: !lambda |-
-          int val = static_cast<int>(x * 1000.0f);
-          std::string cmd = "consumLim " + to_string(val);
-          std::vector<uint8_t> data(cmd.begin(), cmd.end());
-          data.push_back(0xFF);
-          data.push_back(0xFF);
-          data.push_back(0xFF);
-          return data;
-    on_value:
-      - lvgl.slider.update:
-          id: lvgl_slider_session_consumption
-          value: !lambda return x * 10;
-      - lvgl.label.update:
-          id: lvgl_label_session_consumption
-          text: !lambda |-
-            if (x == 0) {
-                return "none";
-            } else {
-                static char buf[10];
-                snprintf(buf, sizeof(buf), "%.1f kWh", x);
-                return buf;
-            }
+    default_charging_current:
+      name: ${friendly_name_evse} Default charging current
+    maximum_charging_current:
+      name: ${friendly_name_evse} Max charging current
+      mode: box
+      on_value:
+        - globals.set:
+            id: var_evse_max_charge_current
+            value: !lambda return x;
 
-  - platform: template
-    name: ${friendly_name_evse} Charging time limit
-    id: evse_charge_time_limit
-    optimistic: true
-    unit_of_measurement: m
-    min_value: 0
-    max_value: 300 #5h, in minutes
-    step: 5
-    mode: box
-    icon: mdi:clock-time-eight-outline
-    set_action:
-      - uart.write: !lambda |-
-          int val = static_cast<int>(x * 60.0f);
-          std::string cmd = "chTimeLim " + to_string(val);
-          std::vector<uint8_t> data(cmd.begin(), cmd.end());
-          data.push_back(0xFF);
-          data.push_back(0xFF);
-          data.push_back(0xFF);
-          return data;
-    on_value:
-      - lvgl.slider.update:
-          id: lvgl_slider_session_charging_time
-          value: !lambda return x / 5;
-      - lvgl.label.update:
-          id: lvgl_label_session_charging_time
-          text: !lambda |-
-            if (x == 0) {
-                return "none";
-            } else {
-                int minutes = (int)x;
-                auto format_duration_minutes = [](int total_minutes) -> std::string {
-                  int hours = total_minutes / 60;
-                  int minutes = total_minutes % 60;
-                  std::string result;
-                  if (hours > 0) result += std::to_string(hours) + "h ";
-                  result += std::to_string(minutes) + "m";
-                  return result;
-                };
-                return format_duration_minutes(minutes);
-            }
-
-  - platform: template
-    name: ${friendly_name_evse} Under power limit
-    id: evse_underpower_limit
-    optimistic: true
-    unit_of_measurement: kW
-    device_class: power
-    min_value: 0
-    max_value: 10
-    step: 0.1
-    mode: box
-    set_action:
-      - uart.write: !lambda |-
-          int val = static_cast<int>(x * 1000.0f);
-          std::string cmd = "uPowerLim " + to_string(val);
-          std::vector<uint8_t> data(cmd.begin(), cmd.end());
-          data.push_back(0xFF);
-          data.push_back(0xFF);
-          data.push_back(0xFF);
-          return data;
-    on_value:
-      - lvgl.slider.update:
-          id: lvgl_slider_session_underpower
-          value: !lambda return x * 10;
-      - lvgl.label.update:
-          id: lvgl_label_session_underpower
-          text: !lambda |-
-            if (x == 0) {
-                return "none";
-            } else {
-                static char buf[10];
-                snprintf(buf, sizeof(buf), "%.1f kW", x);
-                return buf;
-            }
+    consumption_limit:
+      name: ${friendly_name_evse} Energy consumption limit
+      id: evse_consumption_limit
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_slider_session_consumption
+            value: !lambda return x * 10;
+        - lvgl.label.update:
+            id: lvgl_label_session_consumption
+            text: !lambda |-
+              if (x == 0) {
+                  return "none";
+              } else {
+                  static char buf[10];
+                  snprintf(buf, sizeof(buf), "%.1f kWh", x);
+                  return buf;
+              }
+    default_consumption_limit:
+      name: ${friendly_name_evse} Default energy consumption limit
+    charging_time_limit:
+      name: ${friendly_name_evse} Charging time limit
+      id: evse_charge_time_limit
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_slider_session_charging_time
+            value: !lambda return x / 5;
+        - lvgl.label.update:
+            id: lvgl_label_session_charging_time
+            text: !lambda |-
+              if (x == 0) {
+                  return "none";
+              } else {
+                  int minutes = (int)x;
+                  auto format_duration_minutes = [](int total_minutes) -> std::string {
+                    int hours = total_minutes / 60;
+                    int minutes = total_minutes % 60;
+                    std::string result;
+                    if (hours > 0) result += std::to_string(hours) + "h ";
+                    result += std::to_string(minutes) + "m";
+                    return result;
+                  };
+                  return format_duration_minutes(minutes);
+              }
+    default_charging_time_limit:
+      name: ${friendly_name_evse} Default charging time limit
+    under_power_limit:
+      name: ${friendly_name_evse} Under power limit
+      id: evse_underpower_limit
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_slider_session_underpower
+            value: !lambda return x * 10;
+        - lvgl.label.update:
+            id: lvgl_label_session_underpower
+            text: !lambda |-
+              if (x == 0) {
+                  return "none";
+              } else {
+                  static char buf[10];
+                  snprintf(buf, sizeof(buf), "%.1f kW", x);
+                  return buf;
+              }
+    default_under_power_limit:
+      name: ${friendly_name_evse} Default under power limit
 
   - platform: template
     name: ${friendly_name} Display sleep time

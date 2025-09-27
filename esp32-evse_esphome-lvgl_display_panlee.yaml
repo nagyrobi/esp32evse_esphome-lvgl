@@ -8,7 +8,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/nagyrobi/esp32evse-esphome
-    refresh: 10min
+    refresh: 4min
     components: [ esp32evse ]
 
 esphome:
@@ -19,8 +19,7 @@ esphome:
       then:
         - delay: 3s
         - esp32evse.state.subscribe: 1s
-        - esp32evse.enable.subscribe: 1s
-
+        - esp32evse.enable.subscribe: 500ms
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -122,13 +121,13 @@ uart:
   baud_rate: 115200 #921600 #115200 #460800
   stop_bits: 1
   parity: NONE
-  debug:
-    direction: BOTH
-    dummy_receiver: false
-    after:
-      delimiter: "\n"
-    sequence:
-      - lambda: UARTDebug::log_string(direction, bytes);
+  # debug:
+    # direction: BOTH
+    # dummy_receiver: false
+    # after:
+      # delimiter: "\r\n"
+    # sequence:
+      # - lambda: UARTDebug::log_string(direction, bytes);
 
 
 esp32evse:
@@ -155,10 +154,8 @@ globals:
     type: float
     restore_value: yes
     initial_value: '32.0'
-  - id: var_evse_enabled
-    type: bool
-    restore_value: no
-
+  - id: var_evse_ses_charge_current
+    type: float
 
 sensor:
   - platform: esp32evse
@@ -735,12 +732,6 @@ number:
               if (percent > 1) percent = 1;
               int slider_val = (int)(percent * 100);
               return slider_val;
-        - lvgl.label.update:
-            id: lvgl_label_charging_current
-            text:
-              format: "%.1f A"
-              args: [ 'x' ]
-
     default_charging_current:
       name: ${friendly_name_evse} Default charging current
     maximum_charging_current:
@@ -750,7 +741,6 @@ number:
         - globals.set:
             id: var_evse_max_charge_current
             value: !lambda return x;
-
     consumption_limit:
       name: ${friendly_name_evse} Energy consumption limit
       id: evse_consumption_limit
@@ -758,16 +748,6 @@ number:
         - lvgl.slider.update:
             id: lvgl_slider_session_consumption
             value: !lambda return x * 10;
-        - lvgl.label.update:
-            id: lvgl_label_session_consumption
-            text: !lambda |-
-              if (x == 0) {
-                  return "none";
-              } else {
-                  static char buf[10];
-                  snprintf(buf, sizeof(buf), "%.1f kWh", x);
-                  return buf;
-              }
     default_consumption_limit:
       name: ${friendly_name_evse} Default energy consumption limit
     charging_time_limit:
@@ -776,24 +756,7 @@ number:
       on_value:
         - lvgl.slider.update:
             id: lvgl_slider_session_charging_time
-            value: !lambda return x / 5;
-        - lvgl.label.update:
-            id: lvgl_label_session_charging_time
-            text: !lambda |-
-              if (x == 0) {
-                  return "none";
-              } else {
-                  int minutes = (int)x;
-                  auto format_duration_minutes = [](int total_minutes) -> std::string {
-                    int hours = total_minutes / 60;
-                    int minutes = total_minutes % 60;
-                    std::string result;
-                    if (hours > 0) result += std::to_string(hours) + "h ";
-                    result += std::to_string(minutes) + "m";
-                    return result;
-                  };
-                  return format_duration_minutes(minutes);
-              }
+            value: !lambda return x * 2;
     default_charging_time_limit:
       name: ${friendly_name_evse} Default charging time limit
     under_power_limit:
@@ -803,16 +766,6 @@ number:
         - lvgl.slider.update:
             id: lvgl_slider_session_underpower
             value: !lambda return x * 10;
-        - lvgl.label.update:
-            id: lvgl_label_session_underpower
-            text: !lambda |-
-              if (x == 0) {
-                  return "none";
-              } else {
-                  static char buf[10];
-                  snprintf(buf, sizeof(buf), "%.1f kW", x);
-                  return buf;
-              }
     default_under_power_limit:
       name: ${friendly_name_evse} Default under power limit
 
@@ -826,23 +779,13 @@ number:
     initial_value: 90
     restore_value: true
     min_value: 0
-    max_value: 300
+    max_value: 600
     step: 5
     mode: box
     on_value:
       - lvgl.slider.update:
           id: lvgl_slider_settings_screen_sleep
           value: !lambda return x;
-      - lvgl.label.update:
-          id: lvgl_label_settings_screen_sleep
-          text: !lambda |-
-            if (x == 0) {
-                return "not set";
-            } else {
-                static char buf[10];
-                snprintf(buf, sizeof(buf), "%.0fs.", x);
-                return buf;
-            }
 
 lvgl:
   buffer_size: 100%
@@ -857,6 +800,8 @@ lvgl:
             id: display_backlight
             transition_length: 2500ms
         - lvgl.pause:
+  on_resume:
+    - lambda: 'return id(evse)->update();'
   top_layer:
     widgets:
       - obj:
@@ -1052,16 +997,17 @@ lvgl:
                           text: "Unknown"
                           x: 70
                           y: 40
-                      - obj:
+                      - obj: # transparent zone above the switch and the label to catch clicks on a wider area
                           id: lvgl_obj_switch_charging
                           x: 5
-                          y: 25
-                          width: 200
-                          height: 60
+                          y: 20
+                          width: 250
+                          height: 65
                           clickable: true
                           opa: TRANSP
                           on_release:
                             - switch.toggle: evse_enable_charge
+
                       - label:
                           text: "Charging current:"
                           x: 10
@@ -1081,9 +1027,9 @@ lvgl:
                           value: 0
                           min_value: 0 
                           max_value: 100 
-                          on_release:
-                            - number.set:
-                                id: evse_charge_current
+                          on_value:
+                            - globals.set:
+                                id: var_evse_ses_charge_current
                                 value: !lambda |-
                                   // Normalizing slider min -> max to 6 -> maxChCur
                                   float percent = x / 100.0;
@@ -1092,6 +1038,15 @@ lvgl:
                                   if (max_amps < min_amps) max_amps = min_amps;
                                   float amps = min_amps + percent * (max_amps - min_amps);
                                   return amps;
+                            - lvgl.label.update:
+                                id: lvgl_label_charging_current
+                                text:
+                                  format: "%.1f A"
+                                  args: [ 'id(var_evse_ses_charge_current)' ]
+                          on_release:
+                            - number.set:
+                                id: evse_charge_current
+                                value: !lambda return id(var_evse_ses_charge_current);
                       - label:
                           text: "Session time"
                           x: 10
@@ -1173,18 +1128,29 @@ lvgl:
                           width: 340
                           value: 10
                           min_value: 0
-                          max_value: 500
+                          max_value: 800
                           on_release:
                             - number.set:
                                 id: evse_consumption_limit
                                 value: !lambda return x / 10;
+                          on_value:
+                            - lvgl.label.update:
+                                id: lvgl_label_session_consumption
+                                text: !lambda |-
+                                  if (x == 0) {
+                                      return "none";
+                                  } else {
+                                      static char buf[10];
+                                      snprintf(buf, sizeof(buf), "%.1f kWh", x / 10);
+                                      return buf;
+                                  }
                       - label:
                           text: "Charging time:"
                           x: 10
                           y: 120
                       - label:
                           id: lvgl_label_session_charging_time
-                          text: "- min."
+                          text: "- h."
                           x: 250
                           y: 120
                           width: 100
@@ -1196,11 +1162,29 @@ lvgl:
                           width: 340
                           value: 10
                           min_value: 0
-                          max_value: 60
+                          max_value: 48
                           on_release:
                             - number.set:
                                 id: evse_charge_time_limit
-                                value: !lambda return x * 5;
+                                value: !lambda return x/2;
+                          on_value:
+                            - lvgl.label.update:
+                                id: lvgl_label_session_charging_time
+                                text: !lambda |-
+                                  if (x == 0) {
+                                      return "none";
+                                  } else {
+                                      int minutes = x * 30;
+                                      auto format_duration_minutes = [](int total_minutes) -> std::string {
+                                        int hours = total_minutes / 60;
+                                        int minutes = total_minutes % 60;
+                                        std::string result;
+                                        if (hours > 0) result += std::to_string(hours) + "h ";
+                                        result += std::to_string(minutes) + "m";
+                                        return result;
+                                      };
+                                      return format_duration_minutes(minutes);
+                                  }
                       - label:
                           text: "Under power:"
                           x: 10
@@ -1224,6 +1208,17 @@ lvgl:
                             - number.set:
                                 id: evse_underpower_limit
                                 value: !lambda return x / 10;
+                          on_value:
+                            - lvgl.label.update:
+                                id: lvgl_label_session_underpower
+                                text: !lambda |-
+                                  if (x == 0) {
+                                      return "none";
+                                  } else {
+                                      static char buf[10];
+                                      snprintf(buf, sizeof(buf), "%.1f kW", x / 10);
+                                      return buf;
+                                  }
                 - name: "\uF013\nSettings"
                   id: tab_evse_settings
                   widgets:
@@ -1277,12 +1272,22 @@ lvgl:
                           width: 340
                           value: 10
                           min_value: 0
-                          max_value: 300
+                          max_value: 600
                           on_release:
                             - number.set:
                                 id: display_timeout
                                 value: !lambda return x;
-                
+                          on_value:
+                            - lvgl.label.update:
+                                id: lvgl_label_settings_screen_sleep
+                                text: !lambda |-
+                                  if (x == 0) {
+                                      return "not set";
+                                  } else {
+                                      static char buf[10];
+                                      snprintf(buf, sizeof(buf), "%.0fs.", x);
+                                      return buf;
+                                  }
                 - name: "\uF304\nInfo"
                   id: tab_evse_info
                   pad_all: 0
@@ -1433,7 +1438,7 @@ lvgl:
                                             grid_cell_row_pos: 8
                                             grid_cell_x_align: END
                                         - button:
-                                            id: lvgl_button_info_reboot_evse
+                                            id: lvgl_button_info_update_evse
                                             grid_cell_column_pos: 0
                                             grid_cell_row_pos: 9
                                             grid_cell_x_align: START
@@ -1442,7 +1447,20 @@ lvgl:
                                             widgets:
                                             - label:
                                                 align: CENTER
-                                                text: "Reboot ESP32-EVSE"
+                                                text: "Refresh ESP32-EVSE data"
+                                            on_release:
+                                              - lambda: 'return id(evse)->update();'
+                                        - button:
+                                            id: lvgl_button_info_reboot_evse
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 10
+                                            grid_cell_x_align: START
+                                            height: 20
+                                            width: 200
+                                            widgets:
+                                            - label:
+                                                align: CENTER
+                                                text: "Restart ESP32-EVSE"
                                             on_release:
                                               - button.press: evse_restart
                             - name: "Status"
@@ -1704,3 +1722,4 @@ lvgl:
                                             grid_cell_column_pos: 1
                                             grid_cell_row_pos: 7
                                             grid_cell_x_align: END
+

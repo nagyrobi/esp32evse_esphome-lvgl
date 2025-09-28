@@ -19,6 +19,8 @@ esphome:
   name: ${device_name}
   comment: "${device_description}"
   area: "${area_name}"
+  includes:
+    - custom/lvgl_time_string_formatter.h
   on_boot:
     - priority: -300
       then:
@@ -145,23 +147,7 @@ sensor:
               if (x == 0) {
                   return "-";
               } else {
-                  int total = (int)x;
-                  auto format_duration = [](int total_seconds) -> std::string {
-                    int days = total_seconds / 86400;
-                    int hours = (total_seconds % 86400) / 3600;
-                    int minutes = (total_seconds % 3600) / 60;
-                    int seconds = total_seconds % 60;
-                    if (total_seconds < 60) {
-                      return std::to_string(seconds) + "s";
-                    } else if (total_seconds < 3600) {
-                      return std::to_string(minutes) + "m " + std::to_string(seconds) + "s";
-                    } else if (total_seconds < 86400) {
-                      return std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-                    } else {
-                      return std::to_string(days) + "d " + std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-                    }
-                  };
-                  return format_duration(total);
+                  return formatNiceTime(int(x));
               }
     emeter_charging_time:
       name: ${friendly_name_evse} Charging time
@@ -173,23 +159,7 @@ sensor:
               if (x == 0) {
                   return "-";
               } else {
-                  int total = (int)x;
-                  auto format_duration = [](int total_seconds) -> std::string {
-                    int days = total_seconds / 86400;
-                    int hours = (total_seconds % 86400) / 3600;
-                    int minutes = (total_seconds % 3600) / 60;
-                    int seconds = total_seconds % 60;
-                    if (total_seconds < 60) {
-                      return std::to_string(seconds) + "s";
-                    } else if (total_seconds < 3600) {
-                      return std::to_string(minutes) + "m " + std::to_string(seconds) + "s";
-                    } else if (total_seconds < 86400) {
-                      return std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-                    } else {
-                      return std::to_string(days) + "d " + std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-                    }
-                  };
-                  return format_duration(total);
+                  return formatNiceTime(int(x));
               }
     heap_used:
       name: ${friendly_name_evse} Heap used
@@ -326,23 +296,7 @@ sensor:
       - lvgl.label.update:
           id: lvgl_label_info_uptime_disp
           text: !lambda |-
-            int total = (int)x;
-            auto format_duration = [](int total_seconds) -> std::string {
-              int days = total_seconds / 86400;
-              int hours = (total_seconds % 86400) / 3600;
-              int minutes = (total_seconds % 3600) / 60;
-              int seconds = total_seconds % 60;
-              if (total_seconds < 60) {
-                return std::to_string(seconds) + "s";
-              } else if (total_seconds < 3600) {
-                return std::to_string(minutes) + "m " + std::to_string(seconds) + "s";
-              } else if (total_seconds < 86400) {
-                return std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-              } else {
-                return std::to_string(days) + "d " + std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-              }
-            };
-            return format_duration(total);
+            return formatNiceTime(int(x));
 
   # - platform: template
     # name: ${friendly_name_evse} Uptime
@@ -357,24 +311,7 @@ sensor:
       # - lvgl.label.update:
           # id: lvgl_label_info_uptime
           # text: !lambda |-
-            # int total = (int)x;
-            # auto format_duration = [](int total_seconds) -> std::string {
-              # int days = total_seconds / 86400;
-              # int hours = (total_seconds % 86400) / 3600;
-              # int minutes = (total_seconds % 3600) / 60;
-              # int seconds = total_seconds % 60;
-              # if (total_seconds < 60) {
-                # return std::to_string(seconds) + "s";
-              # } else if (total_seconds < 3600) {
-                # return std::to_string(minutes) + "m " + std::to_string(seconds) + "s";
-              # } else if (total_seconds < 86400) {
-                # return std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-              # } else {
-                # return std::to_string(days) + "d " + std::to_string(hours) + "h " + std::to_string(minutes) + "m";
-              # }
-            # };
-            # return format_duration(total);
-
+            # return formatNiceTime(int(x));
 
 binary_sensor:
   - platform: status
@@ -384,7 +321,6 @@ binary_sensor:
       - lvgl.label.update:
           id: lvgl_label_info_disp_api_connected
           text: !lambda 'return std::string(x ? "Yes" : "No");'
-
 
   - platform: esp32evse
     esp32evse_id: evse
@@ -396,7 +332,6 @@ binary_sensor:
         - lvgl.widget.hide: lvgl_authorize_popup_window
     wifi_connected:
       name: ${friendly_name_evse} WiFi connected
-
 
   # - platform: template
     # name: ${friendly_name_evse} Charging limit reached
@@ -1115,16 +1050,7 @@ lvgl:
                                   if (x == 0) {
                                       return "none";
                                   } else {
-                                      int minutes = x * 30;
-                                      auto format_duration_minutes = [](int total_minutes) -> std::string {
-                                        int hours = total_minutes / 60;
-                                        int minutes = total_minutes % 60;
-                                        std::string result;
-                                        if (hours > 0) result += std::to_string(hours) + "h ";
-                                        result += std::to_string(minutes) + "m";
-                                        return result;
-                                      };
-                                      return format_duration_minutes(minutes);
+                                      return formatNiceTime(int(x * 1800));
                                   }
                           on_release:
                             - number.set:
@@ -1668,3 +1594,4 @@ lvgl:
                                             grid_cell_column_pos: 1
                                             grid_cell_row_pos: 7
                                             grid_cell_x_align: END
+

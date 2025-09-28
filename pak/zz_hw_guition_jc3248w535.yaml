@@ -1,0 +1,73 @@
+substitutions:
+  device_description: "Guition JC3248w535"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  speed: 80MHz
+  mode: octal
+
+wifi:
+  reboot_timeout: 30min
+  enable_btm: true
+
+spi:
+  id: display_qspi
+  type: quad
+  clk_pin: 47
+  data_pins: 
+    - 21
+    - 48
+    - 40
+    - 39
+
+i2c:
+  id: touchscreen_bus
+  sda: 4
+  scl: 8
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: 1
+
+light:
+  - id: display_backlight
+    name: Backlight
+    platform: monochromatic
+    output: gpio_backlight_pwm
+    restore_mode: ALWAYS_ON
+    default_transition_length: 500ms
+
+display:
+  - platform: mipi_spi
+    id: my_display
+    model: JC3248W535
+    rotation: 90
+
+touchscreen:
+  - platform: axs15231
+    id: my_touch
+    display: my_display
+    update_interval: 100ms
+    # interrupt_pin: 
+      # number: 3
+      # ignore_strapping_warning: true
+    calibration:
+      x_min: 0
+      x_max: 479
+      y_min: 0
+      y_max: 319
+    transform:
+      swap_xy: true
+      mirror_x: false
+      mirror_y: true
+      
+uart:
+  - id: evse_uart
+    tx_pin: 43
+    rx_pin: 44

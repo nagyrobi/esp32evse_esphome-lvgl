@@ -14,6 +14,7 @@ external_components:
 packages: #uncomment the one for your display
   display_hw: !include pak/zz_hw_wireless-tag_wt32-sc01-plus.yaml
   #display_hw: !include pak/zz_hw_guition_jc3248w535.yaml
+  #display_hw: !include pak/zz_hw_guition-4848s040.yaml
 
 esphome:
   name: ${device_name}

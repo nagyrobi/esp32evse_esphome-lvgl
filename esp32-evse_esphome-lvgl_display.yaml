@@ -699,7 +699,7 @@ number:
       id: evse_def_underpower_limit
       on_value:
         - lvgl.slider.update:
-            id: lvgl_slider_session_underpower
+            id: lvgl_sliderevse_sett_def_underpowlim
             value: !lambda return x * 10;
 
   - platform: template
@@ -1255,7 +1255,6 @@ lvgl:
                                 grid_cell_column_span: 3
                                 adv_hittest: true
                                 width: 95%
-                                value: 10
                                 min_value: 0
                                 max_value: 100
                                 on_value:
@@ -1600,7 +1599,6 @@ lvgl:
                                               grid_cell_column_span: 3
                                               width: 95%
                                               adv_hittest: true
-                                              value: 10
                                               min_value: 10
                                               max_value: 100
                                               on_release:
@@ -1635,7 +1633,6 @@ lvgl:
                                               grid_cell_column_span: 3
                                               width: 95%
                                               adv_hittest: true
-                                              value: 10
                                               min_value: 0
                                               max_value: 1800
                                               on_value:

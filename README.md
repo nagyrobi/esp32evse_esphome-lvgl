@@ -5,6 +5,11 @@ It relies on the [external ESPHoome component](https://github.com/nagyrobi/esp32
 
 ![Screen](images/esp32-evse_esphome-lvgl.gif)
 
+Example configuration is prepared for 3 types of screen hardware boards:
+- Wireless-Tag/Panlee WT32-SC01 Plus
+- Guition 4848s040
+- Guition JC3248w535
+
 ESPHome supports [LVGL graphics library](https://esphome.io/components/lvgl/). Using ESPHome as a framework instead of trying to implement LVGL natively has the advantage that besides making it a lot more simpler to configure, it brings in all the modularity of the ecosystem: 
 - any graphical UI can be rendered via LVGL, with fully open source resources (no proprietary editor needed), just edit a YAML file
 - multiple UARTs can be configured (eg one talking to `esp32-evse`, other talking to smart meter or inverter etc.)

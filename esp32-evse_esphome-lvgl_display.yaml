@@ -1,17 +1,17 @@
 substitutions:
-  device_name: esp32-evse-display2
+  device_name: esp32-evse-display
+  friendly_name_evse: "EVSE"
+  friendly_name: "EVSE Display"
   area_name: "Garage"
-  friendly_name: "ESP32-EVSE Display 2"
-  friendly_name_evse: "EVSE 2"
 
 external_components:
   - source:
       type: git
       url: https://github.com/nagyrobi/esp32evse-esphome
-    refresh: 4min
+    refresh: 1day
     components: [ esp32evse ]
 
-packages:
+packages: #uncomment the one for your display
   display_hw: !include pak/zz_hw_wireless-tag_wt32-sc01-plus.yaml
   #display_hw: !include pak/zz_hw_guition_jc3248w535.yaml
 
@@ -20,13 +20,12 @@ esphome:
   comment: "${device_description}"
   area: "${area_name}"
   includes:
-    - custom/lvgl_time_string_formatter.h
+    - pak/lvgl_time_string_formatter_en.h
   on_boot:
     - priority: -300
       then:
-        - delay: 3s
-        - esp32evse.state.subscribe: 1s
-        - esp32evse.enable.subscribe: 500ms
+        - delay: 1s
+        - script.execute: init_evse_comms
 
 logger:
   baud_rate: 0
@@ -68,21 +67,31 @@ touchscreen:
 
 uart:
   - id: !extend evse_uart
-    baud_rate: 115200 #921600 #115200 #460800
+    baud_rate: 115200
     stop_bits: 1
     parity: NONE
     # debug:
       # direction: BOTH
       # dummy_receiver: false
       # after:
-        # delimiter: "\r\n"
+        # delimiter: "\n"
       # sequence:
         # - lambda: UARTDebug::log_string(direction, bytes);
-
 
 esp32evse:
   id: evse
   uart_id: evse_uart
+  on_ready:
+    - script.execute: init_evse_comms
+
+script:
+  - id: init_evse_comms
+    then:
+      - esp32evse.unsubscribe_all:
+      - esp32evse.force_update:
+      - esp32evse.state.subscribe: 500ms
+      - esp32evse.enable.subscribe: 500ms
+      - esp32evse.error.subscribe: 3s
 
 mapping:
   - id: j1772_state_map
@@ -97,7 +106,7 @@ mapping:
       D1: Ready to charge with ventilation
       D2: Charging with ventilation
       E: Connection error
-      F: Error
+      F: Error (unavailable)
 
 globals:
   - id: var_evse_max_charge_current
@@ -106,26 +115,12 @@ globals:
     initial_value: '32.0'
   - id: var_evse_ses_charge_current
     type: float
+  - id: var_evse_def_charge_current
+    type: float
 
 sensor:
   - platform: esp32evse
     esp32evse_id: evse
-    temperature:
-      name: ${friendly_name_evse} Temperature High
-      on_value:
-        - lvgl.label.update:
-            id: lvgl_label_info_temphi
-            text:
-              format: "%.1f °C"
-              args: [ 'x' ]
-    temperature_low:
-      name: ${friendly_name_evse} Temperature Low
-      on_value:
-        - lvgl.label.update:
-            id: lvgl_label_info_templo
-            text:
-              format: "%.1f °C"
-              args: [ 'x' ]
     emeter_power:
       name: ${friendly_name_evse} Charging power
       id: evse_power
@@ -133,7 +128,7 @@ sensor:
         - lvgl.label.update:
             id: 
               - lvgl_label_charging_power
-              - lvgl_label_mains_power
+              - lvgl_label_meter_power
             text:
               format: "%.1f kW"
               args: [ 'x / 1000' ]
@@ -161,22 +156,6 @@ sensor:
               } else {
                   return formatNiceTime(int(x));
               }
-    heap_used:
-      name: ${friendly_name_evse} Heap used
-      on_value:
-        - lvgl.label.update:
-            id: lvgl_label_info_heapevse_used
-            text:
-              format: "%.0f B"
-              args: [ 'x' ]
-    heap_total:
-      name: ${friendly_name_evse} Heap total
-      on_value:
-        - lvgl.label.update:
-            id: lvgl_label_info_heapevse_max
-            text:
-              format: "%.0f B"
-              args: [ 'x' ]
     energy_consumption:
       name: ${friendly_name_evse} Energy consumption
       id: evse_session_consumption
@@ -202,8 +181,11 @@ sensor:
         - lvgl.label.update:
             id: lvgl_label_mains_voltage_l1
             text:
-              format: "%.2f \nV"
+              format: "%.1f"
               args: [ 'x' ]
+        - lvgl.indicator.update:
+            id: lvgl_needle_mains_voltage_l1
+            value: !lambda return x; 
     voltage_l2:
       name: ${friendly_name_evse} L2 voltage
       internal: true
@@ -211,8 +193,11 @@ sensor:
         - lvgl.label.update:
             id: lvgl_label_mains_voltage_l2
             text:
-              format: "%.2f \nV"
+              format: "%.1f"
               args: [ 'x' ]
+        - lvgl.indicator.update:
+            id: lvgl_needle_mains_voltage_l2
+            value: !lambda return x; 
     voltage_l3:
       name: ${friendly_name_evse} L3 voltage
       internal: true
@@ -220,8 +205,11 @@ sensor:
         - lvgl.label.update:
             id: lvgl_label_mains_voltage_l3
             text:
-              format: "%.2f \nV"
+              format: "%.1f"
               args: [ 'x' ]
+        - lvgl.indicator.update:
+            id: lvgl_needle_mains_voltage_l3
+            value: !lambda return x; 
     current_l1:
       name: ${friendly_name_evse} L1 current
       internal: true
@@ -229,8 +217,11 @@ sensor:
         - lvgl.label.update:
             id: lvgl_label_mains_current_l1
             text:
-              format: "%.2f \nA"
+              format: "%.1f"
               args: [ 'x' ]
+        - lvgl.indicator.update:
+            id: lvgl_needle_mains_current_l1
+            value: !lambda return x; 
     current_l2:
       name: ${friendly_name_evse} L2 current
       internal: true
@@ -238,8 +229,11 @@ sensor:
         - lvgl.label.update:
             id: lvgl_label_mains_current_l2
             text:
-              format: "%.2f \nA"
+              format: "%.1f"
               args: [ 'x' ]
+        - lvgl.indicator.update:
+            id: lvgl_needle_mains_current_l2
+            value: !lambda return x; 
     current_l3:
       name: ${friendly_name_evse} L3 current
       internal: true
@@ -247,10 +241,58 @@ sensor:
         - lvgl.label.update:
             id: lvgl_label_mains_current_l3
             text:
-              format: "%.2f \nA"
+              format: "%.1f"
+              args: [ 'x' ]
+        - lvgl.indicator.update:
+            id: lvgl_needle_mains_current_l3
+            value: !lambda return x; 
+    temperature_high:
+      name: ${friendly_name_evse} Temperature High
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_temphi
+            text:
+              format: "%.1f °C"
+              args: [ 'x' ]
+    temperature_low:
+      name: ${friendly_name_evse} Temperature Low
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_templo
+            text:
+              format: "%.1f °C"
+              args: [ 'x' ]
+    heap_used:
+      name: ${friendly_name_evse} Heap used
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_heapevse_used
+            text:
+              format: "%.0f B"
+              args: [ 'x' ]
+    heap_total:
+      name: ${friendly_name_evse} Heap total
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_heapevse_max
+            text:
+              format: "%.0f B"
               args: [ 'x' ]
     wifi_rssi:
       name: ${friendly_name_evse} WiFi signal
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_wifi_signal_db
+            text:
+              format: "%.0f dBm"
+              args: [ 'x' ]
+    uptime:
+      name: ${friendly_name_evse} uptime
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_uptime
+            text: !lambda |-
+              return formatNiceTime(int(x));
 
   - platform: wifi_signal 
     name: ${friendly_name} WiFi signal
@@ -298,30 +340,7 @@ sensor:
           text: !lambda |-
             return formatNiceTime(int(x));
 
-  # - platform: template
-    # name: ${friendly_name_evse} Uptime
-    # id: evse_uptime
-    # lambda: return id(evse_uptime_var);
-    # update_interval: 60s
-    # unit_of_measurement: "s"
-    # entity_category: diagnostic
-    # icon: mdi:timer-outline
-    # accuracy_decimals: 0
-    # on_value:
-      # - lvgl.label.update:
-          # id: lvgl_label_info_uptime
-          # text: !lambda |-
-            # return formatNiceTime(int(x));
-
 binary_sensor:
-  - platform: status
-    id: api_connected_bs
-    name: Hálózat
-    on_state:
-      - lvgl.label.update:
-          id: lvgl_label_info_disp_api_connected
-          text: !lambda 'return std::string(x ? "Yes" : "No");'
-
   - platform: esp32evse
     esp32evse_id: evse
     pending_authorization:
@@ -330,96 +349,97 @@ binary_sensor:
         - lvgl.widget.show: lvgl_authorize_popup_window
       on_release:
         - lvgl.widget.hide: lvgl_authorize_popup_window
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_pendauth
+            text: !lambda 'return std::string(x ? "Yes" : "No");'
     wifi_connected:
       name: ${friendly_name_evse} WiFi connected
-
-  # - platform: template
-    # name: ${friendly_name_evse} Charging limit reached
-    # id: evse_limreach
-    # on_press:
-      # - text_sensor.template.publish:
-          # id: evse_charging_statusmsg
-          # state: "Charging limit reached"
-
-  - platform: template
-    name: ${friendly_name_evse} Pilot Fault
-    id: evse_pilot_fault
-    device_class: problem
-    entity_category: diagnostic
-    on_state:
-      - lvgl.label.update:
-          id: lvgl_label_info_pilot_fault
-          text: !lambda 'return std::string(x ? "Error" : "OK");'
-
-  - platform: template
-    name: ${friendly_name_evse} Diode Short
-    id: evse_diode_short
-    device_class: problem
-    entity_category: diagnostic
-    on_state:
-      - lvgl.label.update:
-          id: lvgl_label_info_diode_short
-          text: !lambda 'return std::string(x ? "Error" : "OK");'
-
-  - platform: template
-    name: ${friendly_name_evse} Lock Fault
-    id: evse_lock_fault
-    device_class: problem
-    entity_category: diagnostic
-    on_state:
-      - lvgl.label.update:
-          id: lvgl_label_info_lock_fault
-          text: !lambda 'return std::string(x ? "Error" : "OK");'
-
-  - platform: template
-    name: ${friendly_name_evse} Unlock Fault
-    id: evse_unlock_fault
-    device_class: problem
-    entity_category: diagnostic
-    on_state:
-      - lvgl.label.update:
-          id: lvgl_label_info_unlock_fault
-          text: !lambda 'return std::string(x ? "Error" : "OK");'
-
-  - platform: template
-    name: ${friendly_name_evse} RCM Triggered
-    id: evse_rcm_triggered
-    device_class: problem
-    entity_category: diagnostic
-    on_state:
-      - lvgl.label.update:
-          id: lvgl_label_info_rcm_triggered
-          text: !lambda 'return std::string(x ? "Error" : "OK");'
-
-  - platform: template
-    name: ${friendly_name_evse} RCM Self-Test Fault
-    id: evse_rcm_selftest_fault
-    device_class: problem
-    entity_category: diagnostic
-    on_state:
-      - lvgl.label.update:
-          id: lvgl_label_info_selftest_fault
-          text: !lambda 'return std::string(x ? "Error" : "OK");'
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_wifi_connected
+            text: !lambda 'return std::string(x ? "Yes" : "No");'
+    charging_limit_reached:
+      name: ${friendly_name_evse} Charge limit reached
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_limreach
+            text: !lambda 'return std::string(x ? "Yes" : "No");'
+    pilot_fault:
+      name: ${friendly_name_evse} Fault pilot
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_pilot_fault
+            text: !lambda 'return std::string(x ? "Error" : "OK");'
+    diode_short_fault:
+      name: ${friendly_name_evse} Fault Diode Short
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_diode_short
+            text: !lambda 'return std::string(x ? "Error" : "OK");'
+    lock_fault:
+      name: ${friendly_name_evse} Fault lock
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_lock_fault
+            text: !lambda 'return std::string(x ? "Error" : "OK");'
+    unlock_fault:
+      name: ${friendly_name_evse} Fault unlock
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_unlock_fault
+            text: !lambda 'return std::string(x ? "Error" : "OK");'
+    rcm_triggered_fault:
+      name: ${friendly_name_evse} Fault RCM Triggered
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_rcm_triggered
+            text: !lambda 'return std::string(x ? "Error" : "OK");'
+    rcm_self_test_fault:
+      name: ${friendly_name_evse} Fault RCM Self-Test
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_selftest_fault
+            text: !lambda 'return std::string(x ? "Error" : "OK");'
+    temperature_high_fault:
+      name: ${friendly_name_evse} Fault High Temperature
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_temp_high
+            text: !lambda 'return std::string(x ? "Error" : "OK");'
+    temperature_sensor_fault:
+      name: ${friendly_name_evse} Fault Temperature Sensor
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_temp_fault
+            text: !lambda 'return std::string(x ? "Error" : "OK");'
 
   - platform: template
-    name: ${friendly_name_evse} High Temperature
-    id: evse_temp_high
-    device_class: problem
-    entity_category: diagnostic
-    on_state:
-      - lvgl.label.update:
-          id: lvgl_label_info_temp_high
-          text: !lambda 'return std::string(x ? "Error" : "OK");'
+    id: evse_meter_fast
+    filters:
+      - delayed_off: 3s
+    on_press:
+      - esp32evse.emeter_power.subscribe: 1s
+      - esp32evse.emeter_session_time.subscribe: 1s
+      - esp32evse.emeter_charging_time.subscribe: 1s
+      - esp32evse.energy_consumption.subscribe: 1s
+      - esp32evse.voltage.subscribe: 2s
+      - esp32evse.current.subscribe: 2s
+    on_release:
+      - esp32evse.emeter_power.subscribe: never
+      - esp32evse.emeter_session_time.subscribe: 10s
+      - esp32evse.emeter_charging_time.subscribe: never
+      - esp32evse.energy_consumption.subscribe: never
+      - esp32evse.voltage.subscribe: never
+      - esp32evse.current.subscribe: never
 
-  - platform: template
-    name: ${friendly_name_evse} Temperature Fault
-    id: evse_temp_fault
-    device_class: problem
-    entity_category: diagnostic
+  - platform: status
+    id: api_connected_bs
+    name: Hálózat
     on_state:
       - lvgl.label.update:
-          id: lvgl_label_info_temp_fault
-          text: !lambda 'return std::string(x ? "Error" : "OK");'
+          id: lvgl_label_info_disp_api_connected
+          text: !lambda 'return std::string(x ? "Yes" : "No");'
 
 text_sensor:
   - platform: esp32evse
@@ -437,6 +457,18 @@ text_sensor:
               return x + " (" + id(j1772_state_map)[x] + ")";
         - if:
             condition:
+              lambda: |-
+                return x == "C1" || x == "C2" || x == "D1" || x == "D2";
+            then:
+              - binary_sensor.template.publish:
+                  id: evse_meter_fast
+                  state: ON
+            else:
+              - binary_sensor.template.publish:
+                  id: evse_meter_fast
+                  state: OFF
+        - if:
+            condition:
                 - switch.is_on: evse_reqauth
             then:
               - if:
@@ -449,25 +481,6 @@ text_sensor:
                     - esp32evse.pending_authorization.subscribe: never
         - if:
             condition:
-              lambda: |-
-                return x == "C1" || x == "C2" || x == "D1" || x == "D2";
-            then:
-              - esp32evse.emeter_power.subscribe: 1s
-              # - esp32evse.emeter_session_time.subscribe: 1s
-              # - esp32evse.emeter_charging_time.subscribe: 1s
-              # - esp32evse.energy_consumption.subscribe: 2s
-              # - esp32evse.voltage.subscribe: 2s
-              # - esp32evse.current.subscribe: 2s
-            else:
-              - delay: 5s
-              - esp32evse.emeter_power.subscribe: never
-              # - esp32evse.emeter_session_time.subscribe: never
-              # - esp32evse.emeter_charging_time.subscribe: never
-              # - esp32evse.energy_consumption.subscribe: never
-              # - esp32evse.voltage.subscribe: never
-              # - esp32evse.current.subscribe: never
-        - if:
-            condition:
               lambda: 'return (x != "A");'
             then:
               - lvgl.resume:
@@ -476,9 +489,8 @@ text_sensor:
                   id: display_backlight
                   transition_length: 300ms
 
-
     device_name:
-      name: ${friendly_name_evse}  Device name
+      name: ${friendly_name_evse} Device name
       on_value:
         - lvgl.label.update:
             id: lvgl_label_info_devname
@@ -506,17 +518,27 @@ text_sensor:
             id: lvgl_label_info_ipevse
             text: !lambda 'return x.c_str();'
     wifi_sta_mac:
-      name: ${friendly_name_evse} MAC cím
+      name: ${friendly_name_evse} MAC Address
 
   - platform: wifi_info
     ip_address:
       name: ${friendly_name} IP Address
       id: txt_ip
-      icon: mdi:ip
+      icon: mdi:ip-network
       on_value:
         - lvgl.label.update:
             id: lvgl_label_info_ipdisp
             text: !lambda 'return x.c_str();'
+
+  - platform: version
+    name: ${friendly_name} Version
+    entity_category: diagnostic
+    icon: mdi:tag
+    hide_timestamp: true
+    on_value:
+      - lvgl.label.update:
+          id: lvgl_label_info_fwdisp
+          text: !lambda 'return x.c_str();'
 
   - platform: template
     name: ${friendly_name_evse} State
@@ -527,46 +549,7 @@ text_sensor:
           id: lvgl_label_charging_statusmsg
           text: !lambda 'return x.c_str();'
 
-button:
-  - platform: esp32evse
-    esp32evse_id: evse
-    reset:
-      name: ${friendly_name_evse} Restart
-      id: evse_restart
-    authorize:
-      name: ${friendly_name_evse} Authorize charging
-      id: evse_auhorize_charging
 
-  - platform: restart
-    name: ${friendly_name} Restart
-  - platform: factory_reset
-    name: ${friendly_name} factory reset
-  - platform: safe_mode
-    name: ${friendly_name} safe mode
-
-  - platform: template
-    name: ${friendly_name} Manual update
-    entity_category: diagnostic
-    on_press:
-      - lambda: 'return id(evse)->update();'
-
-  - platform: template
-    name: "Sub ENT"
-    entity_category: diagnostic
-    on_press:
-      - esp32evse.temperature.subscribe: 1s
-      - esp32evse.state.subscribe: 1s
-      - esp32evse.enable.subscribe: 1s
-  - platform: template
-    name: "Unsub ENT"
-    entity_category: diagnostic
-    on_press:
-      - esp32evse.temperature.subscribe: never
-  - platform: template
-    name: "Unsub ALL"
-    entity_category: diagnostic
-    on_press:
-      - esp32evse.unsubscribe_all:
 
 switch:
   - platform: esp32evse
@@ -592,9 +575,43 @@ switch:
             text: "Disabled"
     available:
       name: ${friendly_name_evse} available
+      id: evse_available
+      on_turn_on:
+        - lvgl.widget.update:
+            id: lvgl_switch_available
+            state:
+              checked: true
+      on_turn_off:
+        - lvgl.widget.update:
+            id: lvgl_switch_available
+            state:
+              checked: false
     request_authorization:
-      id: evse_reqauth
       name: ${friendly_name_evse} require authorization
+      id: evse_reqauth
+      on_turn_on:
+        - lvgl.widget.update:
+            id: lvgl_switch_reqauth
+            state:
+              checked: true
+      on_turn_off:
+        - lvgl.widget.update:
+            id: lvgl_switch_reqauth
+            state:
+              checked: false
+    three_phase_meter:
+      name: ${friendly_name_evse} three-phase meter"
+      id: evse_threephase
+      on_turn_on:
+        - lvgl.widget.update:
+            id: lvgl_switch_threephase
+            state:
+              checked: true
+      on_turn_off:
+        - lvgl.widget.update:
+            id: lvgl_switch_threephase
+            state:
+              checked: false
 
 number:
   - platform: esp32evse
@@ -617,12 +634,30 @@ number:
               return slider_val;
     default_charging_current:
       name: ${friendly_name_evse} Default charging current
+      id: evse_def_charge_current
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_sliderevse_sett_def_chcur
+            value: !lambda |-
+              // Normalizing slider scale to 6 -> maxChCur
+              float min_amps = 6.0;
+              float max_amps = id(var_evse_max_charge_current);
+              if (max_amps < min_amps) max_amps = min_amps;
+              float percent = (x - min_amps) / (max_amps - min_amps);
+              if (percent < 0) percent = 0;
+              if (percent > 1) percent = 1;
+              int slider_val = (int)(percent * 100);
+              return slider_val;
     maximum_charging_current:
       name: ${friendly_name_evse} Max charging current
-      mode: box
+      id: evse_max_charge_current
+      max_value: 32  # match the electrical limits of your installation
       on_value:
         - globals.set:
             id: var_evse_max_charge_current
+            value: !lambda return x;
+        - lvgl.slider.update:
+            id: lvgl_sliderevse_sett_max_chcur
             value: !lambda return x;
     consumption_limit:
       name: ${friendly_name_evse} Energy consumption limit
@@ -633,6 +668,11 @@ number:
             value: !lambda return x * 10;
     default_consumption_limit:
       name: ${friendly_name_evse} Default energy consumption limit
+      id: evse_def_consumption_limit
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_sliderevse_sett_def_consumlim
+            value: !lambda return x * 10;
     charging_time_limit:
       name: ${friendly_name_evse} Charging time limit
       id: evse_charge_time_limit
@@ -642,6 +682,11 @@ number:
             value: !lambda return x * 2;
     default_charging_time_limit:
       name: ${friendly_name_evse} Default charging time limit
+      id: evse_def_charge_time_limit
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_sliderevse_sett_def_chtimelim
+            value: !lambda return x * 2;
     under_power_limit:
       name: ${friendly_name_evse} Under power limit
       id: evse_underpower_limit
@@ -651,6 +696,11 @@ number:
             value: !lambda return x * 10;
     default_under_power_limit:
       name: ${friendly_name_evse} Default under power limit
+      id: evse_def_underpower_limit
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_slider_session_underpower
+            value: !lambda return x * 10;
 
   - platform: template
     name: ${friendly_name} Display sleep time
@@ -670,6 +720,24 @@ number:
           id: lvgl_slider_settings_screen_sleep
           value: !lambda return x;
 
+button:
+  - platform: esp32evse
+    esp32evse_id: evse
+    restart:
+      name: ${friendly_name_evse} Restart
+      id: evse_restart
+    authorize:
+      name: ${friendly_name_evse} Authorize charging
+      id: evse_auhorize_charging
+
+  - platform: restart
+    id: display_restart
+    name: ${friendly_name} Restart
+  - platform: factory_reset
+    name: ${friendly_name} factory reset
+  - platform: safe_mode
+    name: ${friendly_name} safe mode
+
 lvgl:
   buffer_size: 100%
   log_level: WARN
@@ -684,7 +752,7 @@ lvgl:
             transition_length: 2500ms
         - lvgl.pause:
   on_resume:
-    - lambda: 'return id(evse)->update();'
+    - esp32evse.force_update:
   top_layer:
     widgets:
       - obj:
@@ -725,7 +793,7 @@ lvgl:
                       - button.press: evse_auhorize_charging
                       - lvgl.widget.hide: lvgl_authorize_popup_window
       - obj:
-          id: lvgl_mains_popup_window
+          id: lvgl_meter3p_popup_window
           hidden: true
           x: 0
           y: 0
@@ -747,15 +815,16 @@ lvgl:
               shadow_spread: 0
               shadow_width: 20
               clickable: false
+              scrollable: false
               pad_all: 6
               layout:
                 type: GRID
                 grid_columns: [FR(31), FR(23), FR(23), FR(23)]
-                grid_rows: [FR(30), FR(35), FR(35)]
+                grid_rows: [FR(20), FR(40), FR(40)]
               widgets:
                 - label:
-                    id: lvgl_label_mains_power
-                    text: "Mains"
+                    id: lvgl_label_meter_power
+                    text: "Meter"
                     text_font: montserrat_22
                     grid_cell_column_pos: 0
                     grid_cell_row_pos: 0
@@ -775,72 +844,108 @@ lvgl:
                     grid_cell_y_align: CENTER
                 - label:
                     text: "L1"
+                    text_font: montserrat_22
                     grid_cell_column_pos: 1
                     grid_cell_row_pos: 0
                     grid_cell_x_align: CENTER
                     grid_cell_y_align: CENTER
-                - label:
-                    id: lvgl_label_mains_current_l1
-                    text: "-.- A"
-                    text_align: CENTER
-                    grid_cell_column_pos: 1
-                    grid_cell_row_pos: 1
-                    grid_cell_x_align: CENTER
-                    grid_cell_y_align: CENTER
-                - label:
-                    id: lvgl_label_mains_voltage_l1
-                    text: "-.- V"
-                    text_align: CENTER
-                    grid_cell_column_pos: 1
-                    grid_cell_row_pos: 2
-                    grid_cell_x_align: CENTER
-                    grid_cell_y_align: CENTER
+                - <<: !include
+                    file: pak/lvgl_semicircle_meter_ev.yaml
+                    vars:
+                      col: 1
+                      row: 1
+                      clr_start: 0x3399ff
+                      clr_end: 0x33ccff
+                      id_needle: lvgl_needle_mains_current_l1
+                      id_text_value: lvgl_label_mains_current_l1
+                      font_text_value: montserrat_16
+                      font_text_label: montserrat_22
+                      text_label: "A"
+                      max_range: 33
+                - <<: !include
+                    file: pak/lvgl_semicircle_meter_ev.yaml
+                    vars:
+                      col: 1
+                      row: 2
+                      clr_start: 0xff8b33
+                      clr_end: 0xffbb33
+                      id_needle: lvgl_needle_mains_voltage_l1
+                      id_text_value: lvgl_label_mains_voltage_l1
+                      font_text_value: montserrat_16
+                      font_text_label: montserrat_22
+                      text_label: "V"
+                      max_range: 260
+
                 - label:
                     text: "L2"
+                    text_font: montserrat_22
                     grid_cell_column_pos: 2
                     grid_cell_row_pos: 0
                     grid_cell_x_align: CENTER
                     grid_cell_y_align: CENTER
-                - label:
-                    id: lvgl_label_mains_current_l2
-                    text: "-.- A"
-                    text_align: CENTER
-                    grid_cell_column_pos: 2
-                    grid_cell_row_pos: 1
-                    grid_cell_x_align: CENTER
-                    grid_cell_y_align: CENTER
-                - label:
-                    id: lvgl_label_mains_voltage_l2
-                    text: "-.- V"
-                    text_align: CENTER
-                    grid_cell_column_pos: 2
-                    grid_cell_row_pos: 2
-                    grid_cell_x_align: CENTER
-                    grid_cell_y_align: CENTER
+                - <<: !include
+                    file: pak/lvgl_semicircle_meter_ev.yaml
+                    vars:
+                      col: 2
+                      row: 1
+                      clr_start: 0x3399ff
+                      clr_end: 0x33ccff
+                      id_needle: lvgl_needle_mains_current_l2
+                      id_text_value: lvgl_label_mains_current_l2
+                      font_text_value: montserrat_16
+                      font_text_label: montserrat_22
+                      text_label: "A"
+                      max_range: 33
+                - <<: !include
+                    file: pak/lvgl_semicircle_meter_ev.yaml
+                    vars:
+                      col: 2
+                      row: 2
+                      clr_start: 0xff8b33
+                      clr_end: 0xffbb33
+                      id_needle: lvgl_needle_mains_voltage_l2
+                      id_text_value: lvgl_label_mains_voltage_l2
+                      font_text_value: montserrat_16
+                      font_text_label: montserrat_22
+                      text_label: "V"
+                      max_range: 260
+
                 - label:
                     text: "L3"
+                    text_font: montserrat_22
                     grid_cell_column_pos: 3
                     grid_cell_row_pos: 0
                     grid_cell_x_align: CENTER
                     grid_cell_y_align: CENTER
-                - label:
-                    id: lvgl_label_mains_current_l3
-                    text: "-.- A"
-                    text_align: CENTER
-                    grid_cell_column_pos: 3
-                    grid_cell_row_pos: 1
-                    grid_cell_x_align: CENTER
-                    grid_cell_y_align: CENTER
-                - label:
-                    id: lvgl_label_mains_voltage_l3
-                    text: "-.- V"
-                    text_align: CENTER
-                    grid_cell_column_pos: 3
-                    grid_cell_row_pos: 2
-                    grid_cell_x_align: CENTER
-                    grid_cell_y_align: CENTER
+                - <<: !include
+                    file: pak/lvgl_semicircle_meter_ev.yaml
+                    vars:
+                      col: 3
+                      row: 1
+                      clr_start: 0x3399ff
+                      clr_end: 0x33ccff
+                      id_needle: lvgl_needle_mains_current_l3
+                      id_text_value: lvgl_label_mains_current_l3
+                      font_text_value: montserrat_16
+                      font_text_label: montserrat_22
+                      text_label: "A"
+                      max_range: 33
+                - <<: !include
+                    file: pak/lvgl_semicircle_meter_ev.yaml
+                    vars:
+                      col: 3
+                      row: 2
+                      clr_start: 0xff8b33
+                      clr_end: 0xffbb33
+                      id_needle: lvgl_needle_mains_voltage_l3
+                      id_text_value: lvgl_label_mains_voltage_l3
+                      font_text_value: montserrat_16
+                      font_text_label: montserrat_22
+                      text_label: "V"
+                      max_range: 260
+
           on_press:
-            - lvgl.widget.hide: lvgl_mains_popup_window
+            - lvgl.widget.hide: lvgl_meter3p_popup_window
 
   pages:
     - id: main_page_evse
@@ -850,314 +955,702 @@ lvgl:
             id: tab_evse
             position: LEFT
             size: 20%
+            content_style:
+              scrollable: false
             tab_style:
                 items:
                     text_align: center
             tabs:
                 - name: "\uF240\nCharging"
-                  text_align: CENTER
                   id: tab_evse_charhing
+                  text_align: CENTER
+                  scrollable: FALSE
                   widgets:
                       - label:
                           text: "Please wait..."
                           id: lvgl_label_charging_statusmsg
                           text_font: montserrat_22
-                      - switch:
-                          x: 10
-                          y: 35
-                          id: lvgl_switch_charging
-#                          on_change:
-#                              - lambda: |-
-#                                  if (x) {
-#                                    id(evse_enable_charge).turn_on();
-#                                  } else {
-#                                    id(evse_enable_charge).turn_off();
-#                                  }
-#                          on_release:
-#                            - switch.toggle: evse_enable_charge
-                      - label:
-                          id: lvgl_label_charging_enabled
-                          text: "Unknown"
-                          x: 70
-                          y: 40
-                      - obj: # transparent zone above the switch and the label to catch clicks on a wider area
-                          id: lvgl_obj_switch_charging
-                          x: 5
-                          y: 20
-                          width: 250
-                          height: 65
-                          clickable: true
-                          opa: TRANSP
-                          on_release:
-                            - switch.toggle: evse_enable_charge
-
-                      - label:
-                          text: "Charging current:"
-                          x: 10
-                          y: 75
-                      - label:
-                          id: lvgl_label_charging_current
-                          text: "-.- A"
-                          x: 250
-                          y: 75
-                          width: 100
-                          text_align: right
-                      - slider:
-                          id: lvgl_slider_charging_current
-                          x: 10
-                          y: 108
-                          width: 340
-                          min_value: 0 
-                          max_value: 100 
-                          on_value:
-                            - globals.set:
-                                id: var_evse_ses_charge_current
-                                value: !lambda |-
-                                  // Normalizing slider min -> max to 6 -> maxChCur
-                                  float percent = x / 100.0;
-                                  float min_amps = 6.0;
-                                  float max_amps = id(var_evse_max_charge_current);
-                                  if (max_amps < min_amps) max_amps = min_amps;
-                                  float amps = min_amps + percent * (max_amps - min_amps);
-                                  return amps;
-                            - lvgl.label.update:
-                                id: lvgl_label_charging_current
-                                text:
-                                  format: "%.1f A"
-                                  args: [ 'id(var_evse_ses_charge_current)' ]
-                          on_release:
-                            - number.set:
-                                id: evse_charge_current
-                                value: !lambda return id(var_evse_ses_charge_current);
-                      - label:
-                          text: "Session time"
-                          x: 10
-                          y: 140
-                      - label:
-                          id: lvgl_label_charging_session_time
-                          text: "-"
-                          x: 250
-                          y: 140
-                          width: 100
-                          text_align: right
-                      - label:
-                          text: "Charging time"
-                          x: 10
-                          y: 165
-                      - label:
-                          id: lvgl_label_charging_charging_time
-                          text: "-"
-                          x: 250
-                          y: 165
-                          width: 100
-                          text_align: right
-                      - label:
-                          text: "Energy consumption"
-                          x: 10
-                          y: 190
-                      - label:
-                          id: lvgl_label_charging_energy_consumed
-                          text: "-.- kWh"
-                          x: 250
-                          y: 190
-                          width: 100
-                          text_align: right
-                      - label:
-                          text: "Power"
-                          x: 10
-                          y: 215
-                      - label:
-                          id: lvgl_label_charging_power
-                          text: "-.- kW"
-                          x: 250
-                          y: 215
-                          width: 100
-                          text_align: right
-                      - button:
-                          x: 250
-                          y: 250
-                          width: 100
-                          height: 35
-                          id: btn_id
+                      - obj:
+                          align: CENTER
+                          height: 90%
+                          width: 100%
+                          border_width: 0
+                          bg_opa: TRANSP
+                          pad_all: 6
+                          pad_top: 0
+                          pad_right: 12
+                          y: 22
+                          scrollable: false
+                          layout:
+                              type: GRID
+                              grid_columns: [FR(60), FR(20), FR(20)]
+                              grid_rows: [40, 22, 22, 20, 20, 20, 20, 30]
                           widgets:
+                            - switch:
+                                id: lvgl_switch_charging
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 0
+                                grid_cell_x_align: START
+                                grid_cell_y_align: CENTER
+                                grid_cell_column_span: 1
+                                width: 70
+                                height: 40
+                            - obj: # transparent zone above the switch and the label to catch clicks on the entire row
+                                id: lvgl_obj_switch_charging
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 0
+                                grid_cell_x_align: START
+                                grid_cell_y_align: CENTER
+                                grid_cell_column_span: 1
+                                width: 100%
+                                height: 40
+                                clickable: true
+                                scrollable: false
+                                border_width: 0
+                                pad_all: 0
+                                bg_opa: TRANSP
+                                widgets:
+                                  - label:
+                                      id: lvgl_label_charging_enabled
+                                      align: LEFT_MID
+                                      clickable: false
+                                      text: "Unknown"
+                                      text_font: montserrat_20
+                                      x: 85
+                                on_release:
+                                  - switch.toggle: evse_enable_charge
                             - label:
-                                align: center
-                                text: "Mains"
-                          on_press:
-                            then:
-                              - lvgl.widget.show: lvgl_mains_popup_window
+                                text: "Charging current:"
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 1
+                                grid_cell_x_align: START
+                                grid_cell_y_align: END
+                            - label:
+                                id: lvgl_label_charging_current
+                                text: "-.- A"
+                                grid_cell_column_pos: 2
+                                grid_cell_row_pos: 1
+                                grid_cell_x_align: END
+                                grid_cell_y_align: END
+                            - slider:
+                                id: lvgl_slider_charging_current
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 2
+                                grid_cell_x_align: CENTER
+                                grid_cell_y_align: START
+                                grid_cell_column_span: 3
+                                width: 95%
+                                min_value: 0
+                                max_value: 100
+                                on_value:
+                                  - globals.set:
+                                      id: var_evse_ses_charge_current
+                                      value: !lambda |-
+                                        // Normalizing slider min -> max to 6 -> maxChCur
+                                        float percent = x / 100.0;
+                                        float min_amps = 6.0;
+                                        float max_amps = id(var_evse_max_charge_current);
+                                        if (max_amps < min_amps) max_amps = min_amps;
+                                        float amps = min_amps + percent * (max_amps - min_amps);
+                                        return amps;
+                                  - lvgl.label.update:
+                                      id: lvgl_label_charging_current
+                                      text:
+                                        format: "%.1f A"
+                                        args: [ 'id(var_evse_ses_charge_current)' ]
+                                on_release:
+                                  - number.set:
+                                      id: evse_charge_current
+                                      value: !lambda return id(var_evse_ses_charge_current);
+                            - label:
+                                text: "Session time"
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 3
+                                grid_cell_x_align: START
+                                grid_cell_y_align: END
+                            - label:
+                                id: lvgl_label_charging_session_time
+                                text: "-"
+                                grid_cell_column_pos: 2
+                                grid_cell_row_pos: 3
+                                grid_cell_x_align: END
+                                grid_cell_y_align: END
+                            - label:
+                                text: "Charging time"
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 4
+                                grid_cell_x_align: START
+                                grid_cell_y_align: END
+                            - label:
+                                id: lvgl_label_charging_charging_time
+                                text: "-"
+                                grid_cell_column_pos: 2
+                                grid_cell_row_pos: 4
+                                grid_cell_x_align: END
+                                grid_cell_y_align: END
+                            - label:
+                                text: "Energy consumption"
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 5
+                                grid_cell_x_align: START
+                                grid_cell_y_align: END
+                            - label:
+                                id: lvgl_label_charging_energy_consumed
+                                text: "-.- kWh"
+                                grid_cell_column_pos: 2
+                                grid_cell_row_pos: 5
+                                grid_cell_x_align: END
+                                grid_cell_y_align: END
+                            - label:
+                                text: "Actual power"
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 6
+                                grid_cell_x_align: START
+                                grid_cell_y_align: END
+                            - label:
+                                id: lvgl_label_charging_power
+                                text: "-.- kW"
+                                grid_cell_column_pos: 2
+                                grid_cell_row_pos: 6
+                                grid_cell_x_align: END
+                                grid_cell_y_align: END
+                            - button:
+                                grid_cell_column_pos: 2
+                                grid_cell_row_pos: 7
+                                grid_cell_x_align: END
+                                grid_cell_y_align: END
+                                width: 100
+                                height: 30
+                                widgets:
+                                  - label:
+                                      align: center
+                                      text: "Meter"
+                                on_press:
+                                  then:
+                                    - lvgl.widget.show: lvgl_meter3p_popup_window
+
                 - name: "\uF079\nLimits"
                   id: tab_evse_limits
+                  scrollable: FALSE
                   widgets:
                       - label:
                           text: "Session limit"
                           text_font: montserrat_22
-                      - label:
-                          text: "Energy consumption:"
-                          x: 10
-                          y: 50
-                      - label:
-                          id: lvgl_label_session_consumption
-                          text: "-.- kWh"
-                          x: 250
-                          y: 50
-                          width: 100
-                          text_align: right
-                      - slider:
-                          id: lvgl_slider_session_consumption
-                          x: 10
-                          y: 85
-                          width: 340
-                          min_value: 0
-                          max_value: 800
-                          on_value:
-                            - lvgl.label.update:
+                      - obj:
+                          align: CENTER
+                          height: 85%
+                          width: 100%
+                          border_width: 0
+                          bg_opa: TRANSP
+                          pad_all: 6
+                          pad_top: 0
+                          pad_right: 16
+                          y: 30
+                          scroll_momentum: false
+                          layout:
+                              type: GRID
+                              grid_columns: [FR(60), FR(20), FR(20)]
+                              grid_rows: [25, 25, 25, 25, 25, 25]
+                              pad_row: 12
+                              pad_column: 10
+                          widgets:
+                            - label:
+                                text: "Energy consumption:"
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 0
+                                grid_cell_x_align: START
+                                grid_cell_y_align: END
+                            - label:
                                 id: lvgl_label_session_consumption
-                                text: !lambda |-
-                                  if (x == 0) {
-                                      return "none";
-                                  } else {
-                                      static char buf[10];
-                                      snprintf(buf, sizeof(buf), "%.1f kWh", x / 10);
-                                      return buf;
-                                  }
-                          on_release:
-                            - number.set:
-                                id: evse_consumption_limit
-                                value: !lambda return x / 10;
-                      - label:
-                          text: "Charging time:"
-                          x: 10
-                          y: 120
-                      - label:
-                          id: lvgl_label_session_charging_time
-                          text: "- h."
-                          x: 250
-                          y: 120
-                          width: 100
-                          text_align: right
-                      - slider:
-                          id: lvgl_slider_session_charging_time
-                          x: 10
-                          y: 155
-                          width: 340
-                          min_value: 0
-                          max_value: 48
-                          on_value:
-                            - lvgl.label.update:
+                                text: "none"
+                                grid_cell_column_pos: 2
+                                grid_cell_row_pos: 0
+                                grid_cell_x_align: END
+                                grid_cell_y_align: END
+                            - slider:
+                                id: lvgl_slider_session_consumption
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 1
+                                grid_cell_x_align: CENTER
+                                grid_cell_y_align: START
+                                grid_cell_column_span: 3
+                                adv_hittest: true
+                                width: 95%
+                                min_value: 0
+                                max_value: 1000
+                                on_value:
+                                  - lvgl.label.update:
+                                      id: lvgl_label_session_consumption
+                                      text: !lambda |-
+                                        if (x == 0) {
+                                            return "none";
+                                        } else {
+                                            static char buf[10];
+                                            snprintf(buf, sizeof(buf), "%.1f kWh", x / 10);
+                                            return buf;
+                                        }
+                                on_release:
+                                  - number.set:
+                                      id: evse_consumption_limit
+                                      value: !lambda return x / 10;
+                            - label:
+                                text: "Charging time:"
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 2
+                                grid_cell_x_align: START
+                                grid_cell_y_align: END
+                            - label:
                                 id: lvgl_label_session_charging_time
-                                text: !lambda |-
-                                  if (x == 0) {
-                                      return "none";
-                                  } else {
-                                      return formatNiceTime(int(x * 1800));
-                                  }
-                          on_release:
-                            - number.set:
-                                id: evse_charge_time_limit
-                                value: !lambda return x/2;
-                      - label:
-                          text: "Under power:"
-                          x: 10
-                          y: 190
-                      - label:
-                          id: lvgl_label_session_underpower
-                          text: "-.- kW"
-                          x: 250
-                          y: 190
-                          width: 100
-                          text_align: right
-                      - slider:
-                          id: lvgl_slider_session_underpower
-                          x: 10
-                          y: 225
-                          width: 340
-                          min_value: 0
-                          max_value: 100
-                          on_value:
-                            - lvgl.label.update:
+                                text: "none"
+                                grid_cell_column_pos: 2
+                                grid_cell_row_pos: 2
+                                grid_cell_x_align: END
+                                grid_cell_y_align: END
+                            - slider:
+                                id: lvgl_slider_session_charging_time
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 3
+                                grid_cell_x_align: CENTER
+                                grid_cell_y_align: START
+                                grid_cell_column_span: 3
+                                adv_hittest: true
+                                width: 95%
+                                min_value: 0
+                                max_value: 48
+                                on_value:
+                                  - lvgl.label.update:
+                                      id: lvgl_label_session_charging_time
+                                      text: !lambda |-
+                                        if (x == 0) {
+                                            return "none";
+                                        } else {
+                                            return formatNiceTime(int(x * 1800));
+                                        }
+                                on_release:
+                                  - number.set:
+                                      id: evse_charge_time_limit
+                                      value: !lambda return x / 2;
+                            - label:
+                                text: "Under power:"
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 4
+                                grid_cell_x_align: START
+                                grid_cell_y_align: END
+                            - label:
                                 id: lvgl_label_session_underpower
-                                text: !lambda |-
-                                  if (x == 0) {
-                                      return "none";
-                                  } else {
-                                      static char buf[10];
-                                      snprintf(buf, sizeof(buf), "%.1f kW", x / 10);
-                                      return buf;
-                                  }
-                          on_release:
-                            - number.set:
-                                id: evse_underpower_limit
-                                value: !lambda return x / 10;
+                                text: "-.- kW"
+                                grid_cell_column_pos: 2
+                                grid_cell_row_pos: 4
+                                grid_cell_x_align: END
+                                grid_cell_y_align: END
+                            - slider:
+                                id: lvgl_slider_session_underpower
+                                grid_cell_column_pos: 0
+                                grid_cell_row_pos: 5
+                                grid_cell_x_align: CENTER
+                                grid_cell_y_align: START
+                                grid_cell_column_span: 3
+                                adv_hittest: true
+                                width: 95%
+                                value: 10
+                                min_value: 0
+                                max_value: 100
+                                on_value:
+                                  - lvgl.label.update:
+                                      id: lvgl_label_session_underpower
+                                      text: !lambda |-
+                                        if (x == 0) {
+                                            return "none";
+                                        } else {
+                                            static char buf[10];
+                                            snprintf(buf, sizeof(buf), "%.1f kW", x / 10);
+                                            return buf;
+                                        }
+                                on_release:
+                                  - number.set:
+                                      id: evse_underpower_limit
+                                      value: !lambda return x / 10;
                 - name: "\uF013\nSettings"
-                  id: tab_evse_settings
+                  id: tab_settings
+                  pad_all: 0
                   widgets:
-                      - label:
-                          text: "Settings"
-                          text_font: montserrat_22
-                      - label:
-                          text: "Screen brightness:"
-                          x: 10
-                          y: 50
-                      - label:
-                          id: lvgl_label_settings_screen_bright
-                          text: "- %"
-                          x: 250
-                          y: 50
-                          width: 100
-                          text_align: right
-                      - slider:
-                          id: lvgl_slider_settings_screen_bright
-                          x: 10
-                          y: 85
-                          width: 340
-                          value: 10
-                          min_value: 10
-                          max_value: 100
-                          on_release:
-                            - light.turn_on:
-                                id: display_backlight
-                                brightness: !lambda return x/100;
-                          on_value:
-                            - lvgl.label.update:
-                                id: lvgl_label_settings_screen_bright
-                                text:
-                                  format: "%.0f%%"
-                                  args: [ 'x' ]
-                      - label:
-                          text: "Screen sleep time:"
-                          x: 10
-                          y: 120
-                      - label:
-                          id: lvgl_label_settings_screen_sleep
-                          text: "- s."
-                          x: 250
-                          y: 120
-                          width: 100
-                          text_align: right
-                      - slider:
-                          id: lvgl_slider_settings_screen_sleep
-                          x: 10
-                          y: 155
-                          width: 340
-                          value: 10
-                          min_value: 0
-                          max_value: 600
-                          on_release:
-                            - number.set:
-                                id: display_timeout
-                                value: !lambda return x;
-                          on_value:
-                            - lvgl.label.update:
-                                id: lvgl_label_settings_screen_sleep
-                                text: !lambda |-
-                                  if (x == 0) {
-                                      return "not set";
-                                  } else {
-                                      static char buf[10];
-                                      snprintf(buf, sizeof(buf), "%.0fs.", x);
-                                      return buf;
-                                  }
+                      - tabview:
+                          position: BOTTOM
+                          content_style:
+                              scrollable: false
+                          tab_style:
+                              items:
+                                  text_align: center
+                          tabs:
+                              - name: "EVSE"
+                                text_align: CENTER
+                                scrollable: FALSE
+                                widgets:
+                                    - label:
+                                        text: "EVSE Settings"
+                                        text_font: montserrat_22
+                                    - obj:
+                                        align: CENTER
+                                        height: 85%
+                                        width: 100%
+                                        border_width: 0
+                                        bg_opa: TRANSP
+                                        pad_all: 6
+                                        pad_top: 0
+                                        pad_right: 16
+                                        y: 15
+                                        scroll_momentum: false
+                                        layout:
+                                            type: GRID
+                                            grid_columns: [FR(60), FR(20), FR(20)]
+                                            grid_rows: [25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25]
+                                            pad_row: 12
+                                            pad_column: 10
+                                        widgets:
+                                          - label:
+                                              text: "Default charging current:"
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 0
+                                              grid_cell_x_align: START
+                                              grid_cell_y_align: END
+                                          - label:
+                                              id: lvgl_label_evse_sett_def_chcur
+                                              text: "- A"
+                                              grid_cell_column_pos: 2
+                                              grid_cell_row_pos: 0
+                                              grid_cell_x_align: END
+                                              grid_cell_y_align: END
+                                          - slider:
+                                              id: lvgl_sliderevse_sett_def_chcur
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 1
+                                              grid_cell_x_align: CENTER
+                                              grid_cell_y_align: START
+                                              grid_cell_column_span: 3
+                                              width: 95%
+                                              adv_hittest: true
+                                              min_value: 0
+                                              max_value: 100
+                                              on_value:
+                                                - globals.set:
+                                                    id: var_evse_def_charge_current
+                                                    value: !lambda |-
+                                                      // Normalizing slider min -> max to 6 -> maxChCur
+                                                      float percent = x / 100.0;
+                                                      float min_amps = 6.0;
+                                                      float max_amps = id(var_evse_max_charge_current);
+                                                      if (max_amps < min_amps) max_amps = min_amps;
+                                                      float amps = min_amps + percent * (max_amps - min_amps);
+                                                      return amps;
+                                                - lvgl.label.update:
+                                                    id: lvgl_label_evse_sett_def_chcur
+                                                    text:
+                                                      format: "%.1f A"
+                                                      args: [ 'id(var_evse_def_charge_current)' ]
+                                              on_release:
+                                                - number.set:
+                                                    id: evse_def_charge_current
+                                                    value: !lambda return id(var_evse_def_charge_current);
+                                          - label:
+                                              text: "Default energy cons. limit:"
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 2
+                                              grid_cell_x_align: START
+                                              grid_cell_y_align: END
+                                          - label:
+                                              id: lvgl_label_evse_sett_def_consumlim
+                                              text: "none"
+                                              grid_cell_column_pos: 2
+                                              grid_cell_row_pos: 2
+                                              grid_cell_x_align: END
+                                              grid_cell_y_align: END
+                                          - slider:
+                                              id: lvgl_sliderevse_sett_def_consumlim
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 3
+                                              grid_cell_x_align: CENTER
+                                              grid_cell_y_align: START
+                                              grid_cell_column_span: 3
+                                              width: 95%
+                                              adv_hittest: true
+                                              min_value: 0
+                                              max_value: 1000
+                                              on_value:
+                                                - lvgl.label.update:
+                                                    id: lvgl_label_evse_sett_def_consumlim
+                                                    text: !lambda |-
+                                                      if (x == 0) {
+                                                          return "none";
+                                                      } else {
+                                                          static char buf[10];
+                                                          snprintf(buf, sizeof(buf), "%.1f kWh", x / 10);
+                                                          return buf;
+                                                      }
+                                              on_release:
+                                                - number.set:
+                                                    id: evse_def_consumption_limit
+                                                    value: !lambda return x/10;
+                                          - label:
+                                              text: "Default charging time limit:"
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 4
+                                              grid_cell_x_align: START
+                                              grid_cell_y_align: END
+                                          - label:
+                                              id: lvgl_label_evse_sett_def_chtimelim
+                                              text: "none"
+                                              grid_cell_column_pos: 2
+                                              grid_cell_row_pos: 4
+                                              grid_cell_x_align: END
+                                              grid_cell_y_align: END
+                                          - slider:
+                                              id: lvgl_sliderevse_sett_def_chtimelim
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 5
+                                              grid_cell_x_align: CENTER
+                                              grid_cell_y_align: START
+                                              grid_cell_column_span: 3
+                                              width: 95%
+                                              adv_hittest: true
+                                              min_value: 0
+                                              max_value: 48
+                                              on_value:
+                                                - lvgl.label.update:
+                                                    id: lvgl_label_evse_sett_def_chtimelim
+                                                    text: !lambda |-
+                                                      if (x == 0) {
+                                                          return "none";
+                                                      } else {
+                                                          return formatNiceTime(int(x * 1800));
+                                                      }
+                                              on_release:
+                                                - number.set:
+                                                    id: evse_def_charge_time_limit
+                                                    value: !lambda return x/2;
+                                          - label:
+                                              text: "Default under power limit:"
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 6
+                                              grid_cell_x_align: START
+                                              grid_cell_y_align: END
+                                          - label:
+                                              id: lvgl_label_evse_sett_def_underpowlim
+                                              text: "none"
+                                              grid_cell_column_pos: 2
+                                              grid_cell_row_pos: 6
+                                              grid_cell_x_align: END
+                                              grid_cell_y_align: END
+                                          - slider:
+                                              id: lvgl_sliderevse_sett_def_underpowlim
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 7
+                                              grid_cell_x_align: CENTER
+                                              grid_cell_y_align: START
+                                              grid_cell_column_span: 3
+                                              width: 95%
+                                              adv_hittest: true
+                                              min_value: 0
+                                              max_value: 100
+                                              on_value:
+                                                - lvgl.label.update:
+                                                    id: lvgl_label_evse_sett_def_underpowlim
+                                                    text: !lambda |-
+                                                      if (x == 0) {
+                                                          return "none";
+                                                      } else {
+                                                          static char buf[10];
+                                                          snprintf(buf, sizeof(buf), "%.1f kW", x / 10);
+                                                          return buf;
+                                                      }
+                                              on_release:
+                                                - number.set:
+                                                    id: evse_def_underpower_limit
+                                                    value: !lambda return x / 10;
+                                          - label:
+                                              id: lvgl_label_charger_available
+                                              text: "Charger available:"
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 8
+                                              grid_cell_x_align: START
+                                              grid_cell_y_align: CENTER
+                                          - switch:
+                                              id: lvgl_switch_available
+                                              grid_cell_column_pos: 2
+                                              grid_cell_row_pos: 8
+                                              grid_cell_x_align: END
+                                              grid_cell_y_align: END
+                                              grid_cell_column_span: 1
+                                              on_release:
+                                                - switch.toggle: evse_available
+                                          - label:
+                                              id: lvgl_label_charger_reqauth
+                                              text: "Require authorization:"
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 9
+                                              grid_cell_x_align: START
+                                              grid_cell_y_align: CENTER
+                                          - switch:
+                                              id: lvgl_switch_reqauth
+                                              grid_cell_column_pos: 2
+                                              grid_cell_row_pos: 9
+                                              grid_cell_x_align: END
+                                              grid_cell_y_align: END
+                                              grid_cell_column_span: 1
+                                              on_release:
+                                                - switch.toggle: evse_reqauth
+                                          - label:
+                                              id: lvgl_label_charger_threephase
+                                              text: "Three-phase metering:"
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 10
+                                              grid_cell_x_align: START
+                                              grid_cell_y_align: CENTER
+                                          - switch:
+                                              id: lvgl_switch_threephase
+                                              grid_cell_column_pos: 2
+                                              grid_cell_row_pos: 10
+                                              grid_cell_x_align: END
+                                              grid_cell_y_align: END
+                                              grid_cell_column_span: 1
+                                              on_release:
+                                                - switch.toggle: evse_threephase
+                                          - label:
+                                              text: "Maximum charging current:"
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 11
+                                              grid_cell_x_align: START
+                                              grid_cell_y_align: END
+                                          - label:
+                                              id: lvgl_label_evse_sett_max_chcur
+                                              text: "- A"
+                                              grid_cell_column_pos: 2
+                                              grid_cell_row_pos: 11
+                                              grid_cell_x_align: END
+                                              grid_cell_y_align: END
+                                          - slider:
+                                              id: lvgl_sliderevse_sett_max_chcur
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 12
+                                              grid_cell_x_align: CENTER
+                                              grid_cell_y_align: START
+                                              grid_cell_column_span: 3
+                                              width: 95%
+                                              adv_hittest: true
+                                              value: 16
+                                              min_value: 6
+                                              max_value: 32 #Set to your max rating
+                                              on_value:
+                                                - lvgl.label.update:
+                                                    id: lvgl_label_evse_sett_max_chcur
+                                                    text:
+                                                      format: "%.0f A"
+                                                      args: [ 'x' ]
+                                              on_release:
+                                                - number.set:
+                                                    id: evse_max_charge_current
+                                                    value: !lambda return x;
+                                                - esp32evse.force_update:
+                              - name: "Display"
+                                text_align: CENTER
+                                scrollable: FALSE
+                                widgets:
+                                    - label:
+                                        text: "Display Settings"
+                                        text_font: montserrat_22
+                                    - obj:
+                                        align: CENTER
+                                        height: 85%
+                                        width: 100%
+                                        border_width: 0
+                                        bg_opa: TRANSP
+                                        pad_all: 6
+                                        pad_top: 0
+                                        pad_right: 12
+                                        y: 30
+                                        scroll_momentum: false
+                                        layout:
+                                            type: GRID
+                                            grid_columns: [FR(60), FR(20), FR(20)]
+                                            grid_rows: [25, 25, 25, 25]
+                                            pad_row: 12
+                                            pad_column: 10
+                                        widgets:
+                                          - label:
+                                              text: "Screen brightness:"
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 0
+                                              grid_cell_x_align: START
+                                              grid_cell_y_align: END
+                                          - label:
+                                              id: lvgl_label_settings_screen_bright
+                                              text: "- %"
+                                              grid_cell_column_pos: 2
+                                              grid_cell_row_pos: 0
+                                              grid_cell_x_align: END
+                                              grid_cell_y_align: END
+                                          - slider:
+                                              id: lvgl_slider_settings_screen_bright
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 1
+                                              grid_cell_x_align: CENTER
+                                              grid_cell_y_align: START
+                                              grid_cell_column_span: 3
+                                              width: 95%
+                                              adv_hittest: true
+                                              value: 10
+                                              min_value: 10
+                                              max_value: 100
+                                              on_release:
+                                                - light.turn_on:
+                                                    id: display_backlight
+                                                    brightness: !lambda return x/100;
+                                              on_value:
+                                                  - lvgl.label.update:
+                                                      id: lvgl_label_settings_screen_bright
+                                                      text:
+                                                        format: "%.0f%%"
+                                                        args: [ 'x' ]
+                                          - label:
+                                              text: "Screen sleep time:"
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 2
+                                              grid_cell_x_align: START
+                                              grid_cell_y_align: END
+                                          - label:
+                                              id: lvgl_label_settings_screen_sleep
+                                              text: "- mp."
+                                              grid_cell_column_pos: 2
+                                              grid_cell_row_pos: 2
+                                              grid_cell_x_align: END
+                                              grid_cell_y_align: END
+                                          - slider:
+                                              id: lvgl_slider_settings_screen_sleep
+                                              grid_cell_column_pos: 0
+                                              grid_cell_row_pos: 3
+                                              grid_cell_x_align: CENTER
+                                              grid_cell_y_align: START
+                                              grid_cell_column_span: 3
+                                              width: 95%
+                                              adv_hittest: true
+                                              value: 10
+                                              min_value: 0
+                                              max_value: 1800
+                                              on_value:
+                                                - lvgl.label.update:
+                                                    id: lvgl_label_settings_screen_sleep
+                                                    text: !lambda |-
+                                                      if (x == 0) {
+                                                          return "not set";
+                                                      } else {
+                                                          return formatNiceTime(int(x));
+                                                      }                               
+                                              on_release:
+                                                - number.set:
+                                                    id: display_timeout
+                                                    value: !lambda return x;
+
+
+
                 - name: "\uF304\nInfo"
                   id: tab_evse_info
                   pad_all: 0
@@ -1187,7 +1680,7 @@ lvgl:
                                       layout:
                                           type: GRID
                                           grid_columns: [FR(40), FR(60)]
-                                          grid_rows: [CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT]
+                                          grid_rows: [CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT]
                                       widgets:
                                         - label:
                                             text: "Device name"
@@ -1215,7 +1708,6 @@ lvgl:
                                             grid_cell_column_pos: 1
                                             grid_cell_row_pos: 1
                                             grid_cell_x_align: END
-
                                         - label:
                                             text: "Temperature high"
                                             text_font: montserrat_16
@@ -1250,7 +1742,7 @@ lvgl:
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_uptime
-                                            text: "- s"
+                                            text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
                                             grid_cell_row_pos: 4
@@ -1268,51 +1760,78 @@ lvgl:
                                             grid_cell_column_pos: 1
                                             grid_cell_row_pos: 5
                                             grid_cell_x_align: END
+
+                                        - label:
+                                            text: "Wi-Fi connected"
+                                            text_font: montserrat_16
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 6
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_wifi_connected
+                                            text: "-"
+                                            text_font: montserrat_16
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 6
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Wi-Fi signal level"
+                                            text_font: montserrat_16
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 7
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_wifi_signal_db
+                                            text: "-"
+                                            text_font: montserrat_16
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 7
+                                            grid_cell_x_align: END
                                         - label:
                                             text: "IP address"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 6
+                                            grid_cell_row_pos: 8
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_ipevse
                                             text: "-.-.-.-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 6
+                                            grid_cell_row_pos: 8
                                             grid_cell_x_align: END
                                         - label:
                                             text: "Heap used"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 7
+                                            grid_cell_row_pos: 9
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_heapevse_used
                                             text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 7
+                                            grid_cell_row_pos: 9
                                             grid_cell_x_align: END
                                         - label:
                                             text: "Heap max"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 8
+                                            grid_cell_row_pos: 10
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_heapevse_max
                                             text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 8
+                                            grid_cell_row_pos: 10
                                             grid_cell_x_align: END
                                         - button:
                                             id: lvgl_button_info_reboot_evse
-                                            grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 9
-                                            grid_cell_x_align: START
-                                            height: 25
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 11
+                                            grid_cell_x_align: END
+                                            height: 30
                                             width: 250
                                             widgets:
                                             - label:
@@ -1337,10 +1856,10 @@ lvgl:
                                       layout:
                                           type: GRID
                                           grid_columns: [FR(40), FR(60)]
-                                          grid_rows: [CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT]
+                                          grid_rows: [CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT]
                                       widgets:
                                         - label:
-                                            text: "State"
+                                            text: "J1772 State"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
                                             grid_cell_row_pos: 0
@@ -1353,124 +1872,148 @@ lvgl:
                                             grid_cell_row_pos: 0
                                             grid_cell_x_align: END
                                         - label:
-                                            text: "Pilot Fault"
+                                            text: "Authorization pending"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
                                             grid_cell_row_pos: 1
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_pendauth
+                                            text: "-"
+                                            text_font: montserrat_16
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 1
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Charge limit reached"
+                                            text_font: montserrat_16
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_limreach
+                                            text: "-"
+                                            text_font: montserrat_16
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Pilot Fault"
+                                            text_font: montserrat_16
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 3
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_pilot_fault
                                             text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 1
+                                            grid_cell_row_pos: 3
                                             grid_cell_x_align: END
                                         - label:
                                             text: "Diode Short"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 2
+                                            grid_cell_row_pos: 4
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_diode_short
                                             text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 2
+                                            grid_cell_row_pos: 4
                                             grid_cell_x_align: END
                                         - label:
                                             text: "Lock Fault"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 3
+                                            grid_cell_row_pos: 5
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_lock_fault
                                             text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 3
+                                            grid_cell_row_pos: 5
                                             grid_cell_x_align: END
                                         - label:
                                             text: "Unlock Fault"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 4
+                                            grid_cell_row_pos: 6
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_unlock_fault
                                             text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 4
+                                            grid_cell_row_pos: 6
                                             grid_cell_x_align: END
                                         - label:
                                             text: "RCM Triggered"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 5
+                                            grid_cell_row_pos: 7
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_rcm_triggered
                                             text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 5
+                                            grid_cell_row_pos: 7
                                             grid_cell_x_align: END
                                         - label:
                                             text: "RCM Self-Test Fault"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 6
+                                            grid_cell_row_pos: 8
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_selftest_fault
                                             text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 6
+                                            grid_cell_row_pos: 8
                                             grid_cell_x_align: END
                                         - label:
                                             text: "High Temperature"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 7
+                                            grid_cell_row_pos: 9
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_temp_high
                                             text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 7
+                                            grid_cell_row_pos: 9
                                             grid_cell_x_align: END
                                         - label:
                                             text: "Temperature Fault"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 8
+                                            grid_cell_row_pos: 10
                                             grid_cell_x_align: START
                                         - label:
                                             id: lvgl_label_info_temp_fault
                                             text: "-"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 1
-                                            grid_cell_row_pos: 8
+                                            grid_cell_row_pos: 10
                                             grid_cell_x_align: END
                                         - button:
                                             id: lvgl_button_info_update_evse
-                                            grid_cell_column_pos: 0
-                                            grid_cell_row_pos: 9
-                                            grid_cell_x_align: START
-                                            height: 25
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 11
+                                            grid_cell_x_align: END
+                                            height: 30
                                             width: 250
                                             widgets:
                                             - label:
                                                 align: CENTER
                                                 text: "Refresh ESP32-EVSE data"
                                             on_release:
-                                              - lambda: 'return id(evse)->update();'
-
-
+                                              - esp32evse.force_update:
                             - name: "Display"
                               text_align: CENTER
                               scrollable: FALSE
@@ -1488,7 +2031,7 @@ lvgl:
                                       layout:
                                           type: GRID
                                           grid_columns: [FR(40), FR(60)]
-                                          grid_rows: [CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT]
+                                          grid_rows: [CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT]
                                       widgets:
                                         - label:
                                             text: "Uptime"
@@ -1594,4 +2137,16 @@ lvgl:
                                             grid_cell_column_pos: 1
                                             grid_cell_row_pos: 7
                                             grid_cell_x_align: END
-
+                                        - button:
+                                            id: lvgl_button_info_reboot_display
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 8
+                                            grid_cell_x_align: END
+                                            height: 27
+                                            width: 48%
+                                            widgets:
+                                            - label:
+                                                align: CENTER
+                                                text: "Restart display"
+                                            on_release:
+                                              - button.press: display_restart

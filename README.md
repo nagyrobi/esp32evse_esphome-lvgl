@@ -1,4 +1,3 @@
-# esp32-evse_esphome-lvgl
 ## HMI for ESP32-EVSE based on ESPHome and LVGL
 
 This is a replacement Human-Machine Interface for the Nextion screen of the excellent [ESP32-EVSE project by Miroslav Dzúrik](https://github.com/dzurikmiroslav/esp32-evse).

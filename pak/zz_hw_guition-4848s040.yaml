@@ -34,7 +34,6 @@ i2c:
     number: 45
     ignore_strapping_warning: true
 
-
 output:
   - platform: ledc
     id: gpio_backlight_pwm

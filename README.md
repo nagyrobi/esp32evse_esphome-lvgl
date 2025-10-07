@@ -1,8 +1,7 @@
-# esp32-evse_esphome-lvgl
 ## HMI for ESP32-EVSE based on ESPHome and LVGL
 
 This is a replacement Human-Machine Interface for the Nextion screen of the excellent [ESP32-EVSE project by Miroslav Dzúrik](https://github.com/dzurikmiroslav/esp32-evse).
-It is a plug and play replacement, as it relies on the original Nextion protocol implemented by the author. _Note:_ It doesn't implement the entire Nextion protocol, just the subset required by the EVSE.
+It relies on the [external ESPHoome component](https://github.com/nagyrobi/esp32evse-esphome) based AT commands protocol. 
 
 ![Screen](images/esp32-evse_esphome-lvgl.gif)
 
@@ -14,8 +13,8 @@ ESPHome supports [LVGL graphics library](https://esphome.io/components/lvgl/). U
 - can connect to Home Assistant via native API (or MQTT to other systems), can expose any chosen EVSE sensors and controls to it
 - easier to make own Dynamic Load Management through HA or other ESPHome components (eg use data from other meters in various ways; freely implement DLM logic either in HA or in ESPHome based on any available data soruces)
 
-The device consists of any graphical display with touch screen supported by [ESPHome](https://esphome.io/components/#display-hardware-platforms). The example file _esp32-evse_esphome-lvgl_display.yaml_ contains working configuration for the [Guition JC3248w535](https://www.aliexpress.com/item/1005007566046827.html) display, which can be connected directly to ESP32-EVSE board, from the 4-pin JST 1.24 connector located near to the USB-C socket. The pins are 5V, TX and RX at 3.3v and GND.
-What makes this a good choice is:
+The device consists of any graphical display with touch screen supported by [ESPHome](https://esphome.io/components/#display-hardware-platforms). The example file _esp32-evse_esphome-lvgl_display.yaml_ contains example configuration for displays like Wireless-Tag/Panlee WT32-SC01 Plus, Guition JC3248w535 which can be connected directly to ESP32-EVSE board.
+What makes these a good choice is:
 - has a pretty nice case that can be mounted on a box which has `esp32-evse` inside
 - has resolution of 480*320
 - has capacitive touch screen
@@ -28,19 +27,23 @@ Any other ESPHome supported graphical display could be used, the config file nee
 
 ## Preparation
 
-The display communicates with ESP32-EVSE (min. version 1.2.0) via UART at 19200 baud rate. Enter your ESP32-EVSE web UI and in _Settings_ > _Serial_, select for the UART port _Mode_: _Nextion display_ and _Baud rate_: _19200_ then press Submit. Prepare a 4-pin cable with 2.5mm JST to 1.25mm JST ends wired correctly for RX/TX/GND/5V:
+The display communicates with ESP32-EVSE (min. version 2.0.0) via UART at 921600 baud rate. 
+Enter your ESP32-EVSE web UI and in _Settings_ > _Serial_, select for the UART port _Mode_: _AT Commands_. _Baud rate_: _921600_,  _Data bits_: _8_,  _Stop bits_: _1_, _Parity_: _Disable_. 
+Press Submit and reboot the evse from  _System_ > _Restart_.
 
-| ESP32-EVSE U6 UART (1 leftmost looking from top, 2.5mm JST) | Display P1 (1 closest to USB-C, 1.25mm JST) |
-| -------- | ------- |
-| 1: GND | 1: GND |
-| 2: TX | 2: RX |
-| 3: RX | 3: TX |
-| 4: +5V | 4: +5V |
+If you use the [esp32s2-evse-d-a board](https://github.com/dzurikmiroslav/esp32-evse/wiki/ESP32-S2-DA) you can use a 4-pin cable with 2.5mm JST wired correctly for RX/TX/GND/5V:
+
+| ESP32-EVSE U6 UART (1 leftmost looking from top, 2.5mm JST) | Guition JC3248w535 P1 (1 closest to USB-C, 1.25mm JST) | WT32-SC01 Plus I/O (leftmost under R11) |
+| -------- | ------- | ------- |
+| 1: GND | 1: GND | 1: +5V |
+| 2: TX | 2: RX | 2: GND |
+| 3: RX | 3: TX | 3: TX |
+| 4: +5V | 4: +5V | 4: RX |
 
 ## Installation
 
 If you're not familiar yet with ESPHome, check out their [Getting Started guide](https://esphome.io/guides/getting_started_hassio). You need at least version 2025.5. I recommend to use their Dashboard.
-Place the ready-made _esp32-evse_esphome-lvgl_display.yaml_ configuration file from this repo in ESPHome's config directory. Create your own `secrets.yaml` file in the same directory with your own data:
+Place the ready-made _esp32-evse_esphome-lvgl_display.yaml_ configuration file from this repo in ESPHome's config directory. In the ``packages:`` section make sure you only have uncommented the line corresponding to your display. Create your own `secrets.yaml` file in the same directory with your own data:
 ```yaml
 wifi_ssid: YOUR_WIFI_SSID
 wifi_password: YOUR_WIFI_KEY

@@ -1,0 +1,76 @@
+substitutions:
+  device_description: "Panlee WT32-SC01 Plus"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  speed: 80MHz
+
+wifi:
+  reboot_timeout: 30min
+  enable_btm: true
+
+spi:
+  id: display_qspi
+  type: octal
+  clk_pin: 47
+  data_pins:
+    - 9
+    - ignore_strapping_warning: true
+      number: 46
+    - ignore_strapping_warning: true
+      number: 3
+    - 8
+    - 18
+    - 17
+    - 16
+    - 15
+
+i2c:
+  id: touchscreen_bus
+  sda: 6
+  scl: 5
+  frequency: 400kHz
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin:
+      number: GPIO45
+      ignore_strapping_warning: true
+
+light:
+  - id: display_backlight
+    name: Backlight
+    platform: monochromatic
+    output: gpio_backlight_pwm
+    restore_mode: ALWAYS_ON
+    default_transition_length: 500ms
+
+display:
+  - platform: mipi_spi
+    id: my_display
+    model: WT32-SC01-PLUS
+    data_rate: 10MHz
+    rotation: 90
+    dc_pin:
+      number: 0
+      ignore_strapping_warning: true
+
+touchscreen:
+  - platform: ft63x6
+    id: my_touch
+    interrupt_pin: 7
+    transform:
+      swap_xy: true
+      mirror_y: true
+      
+uart:
+  - id: evse_uart
+    tx_pin: 11
+    rx_pin: 10
+

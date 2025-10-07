@@ -1,0 +1,63 @@
+obj:
+  height: 85
+  width: 85
+  align: CENTER
+  grid_cell_column_pos: ${col}
+  grid_cell_row_pos: ${row}
+  grid_cell_x_align: CENTER
+  grid_cell_y_align: CENTER
+  bg_opa: TRANSP
+  # border_width: 0
+  border_opa: TRANSP
+  pad_all: 2
+  widgets:
+    - meter:
+        height: 100%
+        width: 100%
+        border_width: 0
+        align: center
+        bg_opa: TRANSP
+        pad_all: 0
+        scales:
+          - range_from: 4
+            range_to: ${max_range}
+            angle_range: 200
+            ticks:
+              count: ${max_range}
+              width: 1
+              length: 16
+            indicators:
+              - tick_style:
+                  start_value: 0
+                  end_value: ${max_range}
+                  color_start: ${clr_start}
+                  color_end: ${clr_end}
+          - range_from: 4
+            range_to: ${max_range}
+            angle_range: 200
+            ticks:
+              count: 0
+            indicators:
+              - line:
+                  id: ${id_needle}
+                  width: 3
+                  r_mod: 3
+                  value: 0
+    - obj: # to erase middle part of meter indicator line
+        height: 56%
+        width: 56%
+        radius: 100
+        align: center
+        border_width: 0
+        pad_all: 0
+    - label:
+        id: ${id_text_value}
+        align: center
+        text_font: ${font_text_value}
+        y: 22
+        text: "0.00"
+    - label:
+        align: center
+        text_font: ${font_text_label}
+        y: -5
+        text: ${text_label}

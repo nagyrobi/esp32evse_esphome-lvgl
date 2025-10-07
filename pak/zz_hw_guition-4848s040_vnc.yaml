@@ -1,0 +1,123 @@
+substitutions:
+  device_description: "Guition 4848s040"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+psram:
+  speed: 80MHz
+  mode: octal
+
+wifi:
+  reboot_timeout: 30min
+  enable_btm: true
+
+ota:
+  - platform: esphome
+    on_begin:
+      - light.turn_off:
+          id: display_backlight
+          transition_length: 0s
+      - lambda: "id(display_backlight).loop();"
+
+spi:
+  - id: lcd_spi
+    clk_pin: GPIO48
+    mosi_pin: GPIO47
+
+i2c:
+  id: touchscreen_bus
+  sda: GPIO19
+  scl:
+    number: 45
+    ignore_strapping_warning: true
+
+
+output:
+  - platform: ledc
+    id: gpio_backlight_pwm
+    pin: GPIO38
+
+light:
+  - id: display_backlight
+    name: Backlight
+    platform: monochromatic
+    output: gpio_backlight_pwm
+    restore_mode: ALWAYS_ON
+    default_transition_length: 500ms
+
+display:
+  - platform: st7701s
+    id: my_display
+    dimensions:
+      width: 480
+      height: 480
+#    rotation: 270    #uncomment for down-facing USB socket
+    spi_mode: MODE3
+    data_rate: 2MHz
+    color_order: RGB
+    invert_colors: False
+    cs_pin: 39
+    de_pin: 18
+    hsync_pin: 16
+    vsync_pin: 17
+    pclk_pin: 21
+    pclk_frequency: 12MHz
+    pclk_inverted: False
+    hsync_pulse_width: 8
+    hsync_front_porch: 10
+    hsync_back_porch: 20
+    vsync_pulse_width: 8
+    vsync_front_porch: 10
+    vsync_back_porch: 10
+    update_interval: never
+    auto_clear_enabled: False
+    init_sequence:
+      - 1
+      # Custom sequences are an array, first byte is command, the rest are data.
+      - [0xFF, 0x77, 0x01, 0x00, 0x00, 0x10] # CMD2_BKSEL_BK0
+      - [0xCD, 0x00] # disable MDT flag
+    data_pins:
+      red:
+        - 11 #r1
+        - 12 #r2
+        - 13 #r3
+        - 14 #r4
+        - 0 #r5
+      green:
+        - 8 #g0
+        - 20 #g1
+        - 3 #g2
+        - 46 #g3
+        - 9 #g4
+        - 10 #g5
+      blue:
+        - 4 #b1
+        - 5 #b2
+        - 6 #b3
+        - 7 #b4
+        - 15 #b5
+
+touchscreen:
+  - platform: gt911
+#    transform:     #uncomment for down-facing USB socket
+#      swap_xy: true
+#      mirror_x: true
+    id: my_touch
+    display: my_display
+    on_release:
+      - if:
+          condition: lvgl.is_paused
+          then:
+          - lvgl.resume:
+          - lvgl.widget.redraw:
+          - light.turn_on:
+              id: display_backlight
+              transition_length: 300ms
+
+uart:
+  - id: evse_uart
+    tx_pin: 43
+    rx_pin: 44

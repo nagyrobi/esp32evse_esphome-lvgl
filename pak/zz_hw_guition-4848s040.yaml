@@ -16,7 +16,7 @@ wifi:
 
 ota:
   - platform: esphome
-    on_begin:
+    on_begin:  # avoid screen flickering during OTA
       - light.turn_off:
           id: display_backlight
           transition_length: 0s
@@ -39,6 +39,9 @@ output:
   - platform: ledc
     id: gpio_backlight_pwm
     pin: GPIO38
+    frequency: 150Hz
+    min_power: 0.01
+    zero_means_zero: true
 
 light:
   - id: display_backlight
@@ -54,7 +57,7 @@ display:
     dimensions:
       width: 480
       height: 480
-#    rotation: 270    #uncomment for down-facing USB socket
+#    rotation: 270    #uncomment for placement with down-facing USB socket
     spi_mode: MODE3
     data_rate: 2MHz
     color_order: RGB
@@ -76,7 +79,6 @@ display:
     auto_clear_enabled: False
     init_sequence:
       - 1
-      # Custom sequences are an array, first byte is command, the rest are data.
       - [0xFF, 0x77, 0x01, 0x00, 0x00, 0x10] # CMD2_BKSEL_BK0
       - [0xCD, 0x00] # disable MDT flag
     data_pins:
@@ -102,7 +104,7 @@ display:
 
 touchscreen:
   - platform: gt911
-#    transform:     #uncomment for down-facing USB socket
+#    transform:     #uncomment for placement with down-facing USB socket
 #      swap_xy: true
 #      mirror_x: true
     id: my_touch

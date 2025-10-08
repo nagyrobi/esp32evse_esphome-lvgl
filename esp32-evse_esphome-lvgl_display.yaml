@@ -8,7 +8,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/nagyrobi/esp32evse-esphome
-    refresh: 1day
+    refresh: 1days
     components: [ esp32evse ]
 
 packages: #uncomment the one for your display

@@ -32,8 +32,8 @@ Any other ESPHome supported graphical display could be used, the config file nee
 
 ## Preparation
 
-The display communicates with ESP32-EVSE (min. version 2.0.0) via UART at 921600 baud rate. 
-Enter your ESP32-EVSE web UI and in _Settings_ > _Serial_, select for the UART port _Mode_: _AT Commands_. _Baud rate_: _921600_,  _Data bits_: _8_,  _Stop bits_: _1_, _Parity_: _Disable_. 
+The display communicates with ESP32-EVSE (min. version 2.0.0) via UART at 115200 baud rate. 
+Enter your ESP32-EVSE web UI and in _Settings_ > _Serial_, select for the UART port _Mode_: _AT Commands_. _Baud rate_: _115200_,  _Data bits_: _8_,  _Stop bits_: _1_, _Parity_: _Disable_. 
 Press Submit and reboot the evse from  _System_ > _Restart_.
 
 If you use the [esp32s2-evse-d-a board](https://github.com/dzurikmiroslav/esp32-evse/wiki/ESP32-S2-DA) you can use a 4-pin cable with 2.5mm JST wired correctly for RX/TX/GND/5V:

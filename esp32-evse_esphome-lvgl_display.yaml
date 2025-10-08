@@ -436,7 +436,7 @@ binary_sensor:
 
   - platform: status
     id: api_connected_bs
-    name: Hálózat
+    name: API
     on_state:
       - lvgl.label.update:
           id: lvgl_label_info_disp_api_connected
@@ -2126,7 +2126,7 @@ lvgl:
                                             grid_cell_row_pos: 6
                                             grid_cell_x_align: END
                                         - label:
-                                            text: "API conneted"
+                                            text: "API connected"
                                             text_font: montserrat_16
                                             grid_cell_column_pos: 0
                                             grid_cell_row_pos: 7

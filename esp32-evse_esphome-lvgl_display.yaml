@@ -436,7 +436,7 @@ binary_sensor:
 
   - platform: status
     id: api_connected_bs
-    name: API
+    name: API Connected
     on_state:
       - lvgl.label.update:
           id: lvgl_label_info_disp_api_connected

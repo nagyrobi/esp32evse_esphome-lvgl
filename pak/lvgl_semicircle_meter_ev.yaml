@@ -7,7 +7,6 @@ obj:
   grid_cell_x_align: CENTER
   grid_cell_y_align: CENTER
   bg_opa: TRANSP
-  # border_width: 0
   border_opa: TRANSP
   pad_all: 2
   widgets:
@@ -19,7 +18,7 @@ obj:
         bg_opa: TRANSP
         pad_all: 0
         scales:
-          - range_from: 4
+          - range_from: 0
             range_to: ${max_range}
             angle_range: 200
             ticks:
@@ -32,7 +31,7 @@ obj:
                   end_value: ${max_range}
                   color_start: ${clr_start}
                   color_end: ${clr_end}
-          - range_from: 4
+          - range_from: 0
             range_to: ${max_range}
             angle_range: 200
             ticks:
@@ -61,3 +60,4 @@ obj:
         text_font: ${font_text_label}
         y: -5
         text: ${text_label}
+        

@@ -892,7 +892,7 @@ lvgl:
                       font_text_value: montserrat_16
                       font_text_label: montserrat_22
                       text_label: "A"
-                      max_range: 33
+                      max_range: 105
                 - <<: !include
                     file: pak/lvgl_semicircle_meter_ev.yaml
                     vars:
@@ -926,7 +926,7 @@ lvgl:
                       font_text_value: montserrat_16
                       font_text_label: montserrat_22
                       text_label: "A"
-                      max_range: 33
+                      max_range: 105
                 - <<: !include
                     file: pak/lvgl_semicircle_meter_ev.yaml
                     vars:
@@ -960,7 +960,7 @@ lvgl:
                       font_text_value: montserrat_16
                       font_text_label: montserrat_22
                       text_label: "A"
-                      max_range: 33
+                      max_range: 105
                 - <<: !include
                     file: pak/lvgl_semicircle_meter_ev.yaml
                     vars:

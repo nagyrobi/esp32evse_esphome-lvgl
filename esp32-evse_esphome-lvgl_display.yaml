@@ -222,7 +222,16 @@ sensor:
               args: [ 'x' ]
         - lvgl.indicator.update:
             id: lvgl_needle_mains_current_l1
-            value: !lambda return x; 
+            value: !lambda |-
+              // Normalizing meter scale to 0 -> maxChCur
+              float min_amps = 0.0;
+              float max_amps = id(var_evse_max_charge_current);
+              if (max_amps < min_amps) max_amps = min_amps;
+              float percent = (x - min_amps) / (max_amps - min_amps);
+              if (percent < 0) percent = 0;
+              if (percent > 1) percent = 1;
+              int meter_val = (int)(percent * 100);
+              return meter_val;
     current_l2:
       name: ${friendly_name_evse} L2 current
       internal: true
@@ -234,7 +243,16 @@ sensor:
               args: [ 'x' ]
         - lvgl.indicator.update:
             id: lvgl_needle_mains_current_l2
-            value: !lambda return x; 
+            value: !lambda |-
+              // Normalizing meter scale to 0 -> maxChCur
+              float min_amps = 0.0;
+              float max_amps = id(var_evse_max_charge_current);
+              if (max_amps < min_amps) max_amps = min_amps;
+              float percent = (x - min_amps) / (max_amps - min_amps);
+              if (percent < 0) percent = 0;
+              if (percent > 1) percent = 1;
+              int meter_val = (int)(percent * 100);
+              return meter_val;
     current_l3:
       name: ${friendly_name_evse} L3 current
       internal: true
@@ -246,7 +264,16 @@ sensor:
               args: [ 'x' ]
         - lvgl.indicator.update:
             id: lvgl_needle_mains_current_l3
-            value: !lambda return x; 
+            value: !lambda |-
+              // Normalizing meter scale to 0 -> maxChCur
+              float min_amps = 0.0;
+              float max_amps = id(var_evse_max_charge_current);
+              if (max_amps < min_amps) max_amps = min_amps;
+              float percent = (x - min_amps) / (max_amps - min_amps);
+              if (percent < 0) percent = 0;
+              if (percent > 1) percent = 1;
+              int meter_val = (int)(percent * 100);
+              return meter_val;
     temperature_high:
       name: ${friendly_name_evse} Temperature High
       on_value:

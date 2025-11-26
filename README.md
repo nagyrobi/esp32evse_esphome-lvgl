@@ -47,7 +47,7 @@ If you use the [esp32s2-evse-d-a board](https://github.com/dzurikmiroslav/esp32-
 
 ## Installation
 
-If you're not familiar yet with ESPHome, check out their [Getting Started guide](https://esphome.io/guides/getting_started_hassio). You need at least version 2025.9. I recommend to use their Dashboard.
+If you're not familiar yet with ESPHome, check out their [Getting Started guide](https://esphome.io/guides/getting_started_hassio). You need at least version 2025.11.2. I recommend to use their Dashboard.
 Place the ready-made _esp32-evse_esphome-lvgl_display.yaml_ configuration file and the _pak_ folder with all its contents from this repo in ESPHome's config directory. In the ``packages:`` section make sure you only have uncommented the line corresponding to your display. Create your own `secrets.yaml` file in the same directory with your own data:
 ```yaml
 wifi_ssid: YOUR_WIFI_SSID

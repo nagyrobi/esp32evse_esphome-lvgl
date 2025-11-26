@@ -1016,6 +1016,7 @@ lvgl:
                               type: GRID
                               grid_columns: [FR(60), FR(20), FR(20)]
                               grid_rows: [40, 22, 22, 20, 20, 20, 20, 30]
+                              multiple_widgets_per_cell: true
                           widgets:
                             - switch:
                                 id: lvgl_switch_charging

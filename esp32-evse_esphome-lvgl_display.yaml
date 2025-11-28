@@ -20,6 +20,7 @@ esphome:
   name: ${device_name}
   comment: "${device_description}"
   area: "${area_name}"
+  min_version: 2025.11.2
   includes:
     - pak/lvgl_time_string_formatter_en.h
   on_boot:

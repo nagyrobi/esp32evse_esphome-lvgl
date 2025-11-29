@@ -9,6 +9,7 @@ esp32:
 
 psram:
   speed: 80MHz
+  mode: quad
 
 wifi:
   reboot_timeout: 30min
@@ -73,4 +74,5 @@ uart:
   - id: evse_uart
     tx_pin: 11
     rx_pin: 10
+
 

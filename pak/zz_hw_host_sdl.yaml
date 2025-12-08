@@ -1,0 +1,38 @@
+substitutions:
+  device_description: "SDL Host"
+
+host:
+
+output:
+  - platform: template
+    id: outputfloat
+    type: float
+    write_action:
+      - logger.log: 
+          format: ""
+          level: VERBOSE 
+
+light:
+  - id: display_backlight
+    name: Backlight
+    platform: monochromatic
+    output: outputfloat
+    restore_mode: ALWAYS_ON
+    default_transition_length: 500ms
+
+display:
+  - platform: sdl
+    id: my_display
+    dimensions:
+      width: 480
+      height: 320
+
+touchscreen:
+  - platform: sdl
+    id: my_touch
+    display: my_display
+      
+uart:
+  - id: evse_uart
+    port: "/dev/ttyS0"
+

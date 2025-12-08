@@ -1,0 +1,3013 @@
+substitutions:
+  device_name: esp32-evse-host
+  area_name: "Garage"
+  friendly_name: "ESP32-EVSE HOST DISP"
+  friendly_name_evse: "EVSE 5"
+  friendly_name_ev: EV
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/nagyrobi/esp32evse-esphome
+    refresh: 1days #always
+    components: [ esp32evse ]
+  - source: github://pr#12312
+    components: [font, image, lvgl] 
+    refresh: always
+
+
+packages:
+  #display_hw: !include pak/zz_hw_wireless-tag_wt32-sc01-plus.yaml
+  #display_hw: !include pak/zz_hw_wireless-tag_wt32-sc01-plus_vnc.yaml
+  #display_hw: !include pak/zz_hw_guition_jc3248w535.yaml
+  display_hw: !include pak/zz_hw_host_sdl.yaml
+#  otax: !include pak/zz_pak_otax.yaml
+#  lvgl_antiburn: !include pak/zz_pak_lvgl_antiburn.yaml
+  garazs_vezerles: !include pak/zz_pak_lvgl_evse_garazs_vezerles.yaml
+
+esphome:
+  name: ${device_name}
+  comment: "${device_description}"
+  area: "${area_name}"
+  project:
+    name: esphome,robi.${device_name}
+    version: "ESP32-EVSE + ESPHome"
+  includes:
+    - custom/lvgl_time_string_formatter.h
+  on_boot:
+    - priority: -300
+      then:
+        - delay: 1s
+        - script.execute: init_evse_comms
+
+logger:
+  baud_rate: 0
+
+debug:
+  update_interval: 60s
+
+# ota:
+  # - platform: esphome
+    # password: !secret ota_password
+
+# wifi:
+  # ssid: !secret wifi_ssid
+  # password: !secret wifi_password
+
+api:
+  reboot_timeout: 15min
+  encryption:
+    key: !secret encryption_key
+
+light:
+  - id: !extend display_backlight
+    on_state:
+      - lvgl.slider.update:
+          id: lvgl_slider_settings_screen_bright
+          value: !lambda return (int(id(display_backlight).remote_values.get_brightness() * 100));
+
+touchscreen:
+  - id: !extend my_touch
+    on_release:
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+            - light.turn_on:
+                id: display_backlight
+                transition_length: 300ms
+
+uart:
+  - id: !extend evse_uart
+    baud_rate: 115200 #921600 #115200 #460800
+    stop_bits: 1
+    parity: NONE
+    # debug:
+      # direction: BOTH
+      # dummy_receiver: false
+      # after:
+        # delimiter: "\n"
+      # sequence:
+        # - lambda: UARTDebug::log_string(direction, bytes);
+
+
+# remote_transmitter:
+  # pin: GPIO12
+  # carrier_duty_percent: 100%
+  # use_dma: true
+
+time:
+  - platform: host #sntp
+    id: time_comp
+    timezone: Europe/Budapest
+    # servers: 
+      # - 172.22.215.254
+      # - 172.22.215.254
+      # - 172.22.215.254
+
+esp32evse:
+  id: evse
+  uart_id: evse_uart
+  on_ready:
+    - script.execute: init_evse_comms
+
+script:
+  - id: init_evse_comms
+    then:
+      - esp32evse.unsubscribe_all:
+      - esp32evse.force_update:
+      - esp32evse.state.subscribe: 500ms
+      - esp32evse.enable.subscribe: 500ms
+      - esp32evse.error.subscribe: 3s
+
+  - id: set_display_idle
+    then:
+      - if:
+          condition: 
+            binary_sensor.is_on: bs_night_mode
+          then:
+            - light.turn_off:
+                id: display_backlight
+                transition_length: 2500ms
+            - lvgl.pause:
+          else:
+            - if:
+                condition: lvgl.is_paused
+                then:
+                  - lvgl.resume:
+                  - lvgl.widget.redraw:
+            - light.turn_on:
+                id: display_backlight
+                transition_length: 1500ms
+
+mapping:
+  - id: j1772_state_map
+    from: string
+    to: string
+    entries:
+      A: Autó csatlakoztatásra várva
+      B1: Autó csatlakoztatva
+      B2: Csatlakoztatva, töltés engedélyezve
+      C1: Töltésre előkészítve
+      C2: Töltés folyamatban
+      D1: Töltésre előkészítve, szellőztetéssel
+      D2: Töltés folyamatban, szellőztetéssel
+      E: Kapcsolat hiba
+      F: Hiba (üzemképtelen)
+
+globals:
+  - id: var_evse_max_charge_current
+    type: float
+    restore_value: yes
+    initial_value: '32.0'
+  - id: var_evse_ses_charge_current
+    type: float
+  - id: var_evse_def_charge_current
+    type: float
+
+sensor:
+  - platform: esp32evse
+    esp32evse_id: evse
+    temperature:
+      name: ${friendly_name_evse} Hőmérséklet
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_temphi
+            text:
+              format: "%.1f °C"
+              args: [ 'x' ]
+    emeter_power:
+      name: ${friendly_name_evse} Teljesítmény
+      id: evse_power
+      on_value:
+        - lvgl.label.update:
+            id: 
+              - lvgl_label_charging_power
+              - lvgl_label_meter_power
+            text:
+              format: "%.1f kW"
+              args: [ 'x / 1000' ]
+    emeter_session_time:
+      name: ${friendly_name_evse} Menet időtartam
+      id: evse_session_time
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_charging_session_time
+            text: !lambda |-
+              if (x == 0) {
+                  return "-";
+              } else {
+                  return formatNiceTime(int(x));
+              }
+    emeter_charging_time:
+      name: ${friendly_name_evse} Töltés időtartam
+      id: evse_charging_time
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_charging_charging_time
+            text: !lambda |-
+              if (x == 0) {
+                  return "-";
+              } else {
+                  return formatNiceTime(int(x));
+              }
+    heap_used:
+      name: ${friendly_name_evse} Heap used
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_heapevse_used
+            text:
+              format: "%.0f B"
+              args: [ 'x' ]
+    heap_total:
+      name: ${friendly_name_evse} Heap total
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_heapevse_max
+            text:
+              format: "%.0f B"
+              args: [ 'x' ]
+    energy_consumption:
+      name: ${friendly_name_evse} Vételezett energiamennyiség
+      id: evse_session_consumption
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_charging_energy_consumed
+            text:
+              format: "%.1f kWh"
+              args: [ 'x / 1000' ]
+    total_energy_consumption:
+      name: ${friendly_name_evse} Vételezett energiamennyiség össz
+      id: evse_total_consumption
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_total_energy
+            text:
+              format: "%.1f kWh"
+              args: [ 'x / 1000' ]
+    voltage_l1:
+      name: ${friendly_name_evse} L1 feszültség
+      internal: true
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_mains_voltage_l1
+            text:
+              format: "%.1f"
+              args: [ 'x' ]
+        - lvgl.indicator.update:
+            id: lvgl_needle_mains_voltage_l1
+            value: !lambda return x ; 
+    voltage_l2:
+      name: ${friendly_name_evse} L2 feszültség
+      internal: true
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_mains_voltage_l2
+            text:
+              format: "%.1f"
+              args: [ 'x' ]
+        - lvgl.indicator.update:
+            id: lvgl_needle_mains_voltage_l2
+            value: !lambda return x; 
+    voltage_l3:
+      name: ${friendly_name_evse} L3 feszültség
+      internal: true
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_mains_voltage_l3
+            text:
+              format: "%.1f"
+              args: [ 'x' ]
+        - lvgl.indicator.update:
+            id: lvgl_needle_mains_voltage_l3
+            value: !lambda return x ; 
+    current_l1:
+      name: ${friendly_name_evse} L1 áramerősség
+      internal: true
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_mains_current_l1
+            text:
+              format: "%.1f"
+              args: [ 'x' ]
+        - lvgl.indicator.update:
+            id: lvgl_needle_mains_current_l1
+            # value: !lambda return x; 
+            value: !lambda |-
+              // Normalizing meter scale to 0 -> maxChCur
+              float min_amps = 0.0;
+              float max_amps = id(var_evse_max_charge_current);
+              if (max_amps < min_amps) max_amps = min_amps;
+              float percent = (x - min_amps) / (max_amps - min_amps);
+              if (percent < 0) percent = 0;
+              if (percent > 1) percent = 1;
+              int meter_val = (int)(percent * 100);
+              return meter_val;
+    current_l2:
+      name: ${friendly_name_evse} L2 áramerősség
+      internal: true
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_mains_current_l2
+            text:
+              format: "%.1f"
+              args: [ 'x' ]
+        - lvgl.indicator.update:
+            id: lvgl_needle_mains_current_l2
+            # value: !lambda return x; 
+            value: !lambda |-
+              // Normalizing meter scale to 0 -> maxChCur
+              float min_amps = 0.0;
+              float max_amps = id(var_evse_max_charge_current);
+              if (max_amps < min_amps) max_amps = min_amps;
+              float percent = (x - min_amps) / (max_amps - min_amps);
+              if (percent < 0) percent = 0;
+              if (percent > 1) percent = 1;
+              int meter_val = (int)(percent * 100);
+              return meter_val;
+    current_l3:
+      name: ${friendly_name_evse} L3 áramerősség
+      internal: true
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_mains_current_l3
+            text:
+              format: "%.1f"
+              args: [ 'x' ]
+        - lvgl.indicator.update:
+            id: lvgl_needle_mains_current_l3
+            # value: !lambda return x; 
+            value: !lambda |-
+              // Normalizing meter scale to 0 -> maxChCur
+              float min_amps = 0.0;
+              float max_amps = id(var_evse_max_charge_current);
+              if (max_amps < min_amps) max_amps = min_amps;
+              float percent = (x - min_amps) / (max_amps - min_amps);
+              if (percent < 0) percent = 0;
+              if (percent > 1) percent = 1;
+              int meter_val = (int)(percent * 100);
+              return meter_val;
+    wifi_rssi:
+      name: ${friendly_name_evse} WiFi jelerősség
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_wifi_signal_db
+            text:
+              format: "%.0f dBm"
+              args: [ 'x' ]
+    uptime:
+      name: ${friendly_name_evse} uptime
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_uptime
+            text: !lambda |-
+              return formatNiceTime(int(x));
+  - platform: uptime
+    name: ${friendly_name} uptime
+    disabled_by_default: false
+    on_value:
+      - lvgl.label.update:
+          id: lvgl_label_info_uptime_disp
+          text: !lambda |-
+            return formatNiceTime(int(x));
+
+  # - platform: wifi_signal 
+    # name: ${friendly_name} WiFi jelerősség
+    # id: wifi_signal_db
+    # entity_category: "diagnostic"
+    # on_value:
+      # - lvgl.label.update:
+          # id: lvgl_label_info_disp_wifi_signal_db
+          # text:
+            # format: "%.0f dBm"
+            # args: [ 'x' ]
+
+  - platform: debug
+    free:
+      name: ${friendly_name} Heap Free
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_heapdisp_free
+            text:
+              format: "%.0f B"
+              args: [ 'x' ]
+    block:
+      name: ${friendly_name} Heap Max Block
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_heapdisp_max
+            text:
+              format: "%.0f B"
+              args: [ 'x' ]
+    loop_time:
+      name: ${friendly_name} Loop Time
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_disploop
+            text:
+              format: "%.0f ms"
+              args: [ 'x' ]
+
+binary_sensor:
+  - platform: esp32evse
+    esp32evse_id: evse
+    pending_authorization:
+      name: ${friendly_name_evse} Jóváhagyásra vár
+      trigger_on_initial_state: true
+      on_press:
+        - lvgl.widget.show: lvgl_authorize_popup_window
+      on_release:
+        - lvgl.widget.hide: lvgl_authorize_popup_window
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_pendauth
+            text: !lambda 'return std::string(x ? "Igen" : "Nem");'
+    wifi_connected:
+      name: ${friendly_name_evse} WiFi csatlakozva
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_wifi_connected
+            text: !lambda 'return std::string(x ? "Igen" : "Nem");'
+    charging_limit_reached:
+      name: ${friendly_name_evse} Beállított limit elérve
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_limreach
+            text: !lambda 'return std::string(x ? "Igen" : "Nem");'
+    pilot_fault:
+      name: ${friendly_name_evse} Hiba Pilot jel
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_pilot_fault
+            text: !lambda 'return std::string(x ? "Hiba" : "OK");'
+    diode_short_fault:
+      name: ${friendly_name_evse} Hiba Dióda rövidzár
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_diode_short
+            text: !lambda 'return std::string(x ? "Hiba" : "OK");'
+    lock_fault:
+      name: ${friendly_name_evse} Hiba Retesz zárás
+    unlock_fault:
+      name: ${friendly_name_evse} Hiba Retesz nyitás
+    rcm_triggered_fault:
+      name: ${friendly_name_evse} Hiba Hibaáram védelem
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_rcm_triggered
+            text: !lambda 'return std::string(x ? "Hiba" : "OK");'
+    rcm_self_test_fault:
+      name: ${friendly_name_evse} Hiba Hibaáram érzékelő önteszt 
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_selftest_fault
+            text: !lambda 'return std::string(x ? "Hiba" : "OK");'
+    temperature_high_fault:
+      name: ${friendly_name_evse} Hiba Magas hőmérséklet
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_temp_high
+            text: !lambda 'return std::string(x ? "Hiba" : "OK");'
+    temperature_sensor_fault:
+      name: ${friendly_name_evse} Hiba Hőmérséklet érzékelő
+      on_state:
+        - lvgl.label.update:
+            id: lvgl_label_info_temp_fault
+            text: !lambda 'return std::string(x ? "Hiba" : "OK");'
+
+  - platform: template
+    id: evse_meter_fast
+    filters:
+      - delayed_off: 3s
+    on_press:
+      - esp32evse.emeter_power.subscribe: 1s
+      - esp32evse.emeter_session_time.subscribe: 1s
+      - esp32evse.emeter_charging_time.subscribe: 1s
+      - esp32evse.energy_consumption.subscribe: 1s
+      - esp32evse.voltage.subscribe: 2s
+      - esp32evse.current.subscribe: 2s
+    on_release:
+      - esp32evse.emeter_power.subscribe: never
+      - esp32evse.emeter_session_time.subscribe: 10s
+      - esp32evse.emeter_charging_time.subscribe: never
+      - esp32evse.energy_consumption.subscribe: never
+      - esp32evse.voltage.subscribe: never
+      - esp32evse.current.subscribe: never
+
+  - platform: status
+    id: api_connected_bs
+    name: ${friendly_name} Hálózat
+    on_state:
+      - lvgl.label.update:
+          id: lvgl_label_info_disp_api_connected
+          text: !lambda 'return std::string(x ? "Igen" : "Nem");'
+
+  - platform: homeassistant
+    id: bs_csaladunk_otthon
+    entity_id: binary_sensor.helyzet_csalad
+    trigger_on_initial_state: true
+
+  - platform: template
+    name: Éjjeli mód
+    id: bs_night_mode
+    icon: mdi:lightbulb-night-outline
+    lambda: |-
+        if (id(bs_csaladunk_otthon).state == false) {
+            return true;
+        } else {
+            return (!(
+              id(evse_state).state.compare(std::string{"C2"}) == 0 or 
+              id(evse_state).state.compare(std::string{"D2"}) == 0 or 
+              id(evse_state).state.compare(std::string{"E"}) == 0 or 
+              id(evse_state).state.compare(std::string{"F"}) == 0 or 
+              id(ts_light_garazs).state.compare(std::string{"on"}) == 0 or
+              id(cover_garazs_pos).state >= 80
+            ));
+        }
+    on_state:
+      - if:
+          condition: 
+            lvgl.is_idle:
+              timeout: 5min
+          then:
+            if:
+              condition:
+                - binary_sensor.is_on: api_connected_bs
+              then:
+                - script.execute: set_display_idle
+
+  - platform: gpio
+    pin:
+      number: GPIO13
+      inverted: true
+      mode: 
+        input: true
+        pullup: true
+    name: ${friendly_name_evse} Töltőfej parkolva
+    icon: mdi:ev-plug-type2
+    device_class: plug
+    filters:
+      - settle: 100ms
+    on_release:
+      - lvgl.resume:
+      - lvgl.widget.redraw:
+      - light.turn_on:
+          id: display_backlight
+          transition_length: 300ms
+      - button.press: evse_toltonyilas_rf
+      - switch.turn_on: evse_enable_charge
+      - lvgl.tabview.select:
+          id: tab_evse_main
+          index: 0
+      - lvgl.tabview.select:
+          id: tab_evse
+          index: 0
+      # - esp32evse.state.subscribe: 1s
+      # - esp32evse.enable.subscribe: 1s
+    # on_press:
+      # - esp32evse.state.subscribe: never
+      # - esp32evse.enable.subscribe: never
+
+text_sensor:
+  - platform: esp32evse
+    esp32evse_id: evse
+    state:
+      name: ${friendly_name_evse} Állapot (J1772)
+      id: evse_state
+      on_value:
+        - text_sensor.template.publish:
+            id: evse_charging_statusmsg
+            state: !lambda return id(j1772_state_map)[x];
+        - lvgl.label.update:
+            id: lvgl_label_info_statusmsg
+            text: !lambda |-
+              return x + " (" + id(j1772_state_map)[x] + ")";
+        - if:
+            condition:
+              lambda: |-
+                return x == "C1" || x == "C2" || x == "D1" || x == "D2";
+            then:
+              - binary_sensor.template.publish:
+                  id: evse_meter_fast
+                  state: ON
+            else:
+              - binary_sensor.template.publish:
+                  id: evse_meter_fast
+                  state: OFF
+        - if:
+            condition:
+                - switch.is_on: evse_reqauth
+            then:
+              - if:
+                  condition:
+                      - lambda: |-
+                          return x == "B1";
+                  then:
+                    - esp32evse.pending_authorization.subscribe: 500ms
+                  else:
+                    - esp32evse.pending_authorization.subscribe: never
+
+    device_name:
+      name: ${friendly_name_evse} Eszköznév
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_devname
+            text: !lambda 'return x.c_str();'
+    version:
+      name: ${friendly_name_evse} Verzió
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_fwevse
+            text: !lambda 'return x.c_str();'
+    chip:
+      name: ${friendly_name_evse} MCU
+    idf_version:
+      name: ${friendly_name_evse} IDF verzió
+    build_time:
+      name: ${friendly_name_evse} Build időpont
+    device_time:
+      name: ${friendly_name_evse} óra
+    wifi_sta_ssid:
+      name: ${friendly_name_evse} SSID
+    wifi_sta_ip:
+      name: ${friendly_name_evse} IP cím
+      on_value:
+        - lvgl.label.update:
+            id: lvgl_label_info_ipevse
+            text: !lambda 'return x.c_str();'
+    wifi_sta_mac:
+      name: ${friendly_name_evse} MAC cím
+
+  # - platform: wifi_info
+    # ip_address:
+      # name: ${friendly_name} IP cím
+      # id: txt_ip
+      # icon: mdi:ip-network
+      # on_value:
+        # - lvgl.label.update:
+            # id: lvgl_label_info_ipdisp
+            # text: !lambda 'return x.c_str();'
+
+  - platform: version
+    name: ${friendly_name} Verzió
+    entity_category: diagnostic
+    icon: mdi:tag
+    hide_timestamp: true
+    on_value:
+      - lvgl.label.update:
+          id: lvgl_label_info_fwdisp
+          text: !lambda 'return x.c_str();'
+
+  - platform: template
+    name: ${friendly_name_evse} Állapot
+    id: evse_charging_statusmsg
+    icon: mdi:ev-station
+    on_value:
+      - lvgl.label.update:
+          id: lvgl_label_charging_statusmsg
+          text: !lambda 'return x.c_str();'
+
+switch:
+  - platform: esp32evse
+    esp32evse_id: evse
+    enable:
+      name: ${friendly_name_evse} Töltés engedélyezés
+      id: evse_enable_charge
+      on_turn_on:
+        - lvgl.widget.update:
+            id: lvgl_switch_charging
+            state:
+              checked: true
+        - lvgl.label.update:
+            id: lvgl_label_charging_enabled
+            text: "Töltés engedélyezve"
+      on_turn_off:
+        - lvgl.widget.update:
+            id: lvgl_switch_charging
+            state:
+              checked: false
+        - lvgl.label.update:
+            id: lvgl_label_charging_enabled
+            text: "Töltés letiltva"
+    available:
+      name: ${friendly_name_evse} elérhető
+      id: evse_available
+      on_turn_on:
+        - lvgl.widget.update:
+            id: lvgl_switch_available
+            state:
+              checked: true
+      on_turn_off:
+        - lvgl.widget.update:
+            id: lvgl_switch_available
+            state:
+              checked: false
+    request_authorization:
+      name: ${friendly_name_evse} jóváhagyás szükséges
+      id: evse_reqauth
+      on_turn_on:
+        - lvgl.widget.update:
+            id: lvgl_switch_reqauth
+            state:
+              checked: true
+      on_turn_off:
+        - lvgl.widget.update:
+            id: lvgl_switch_reqauth
+            state:
+              checked: false
+    three_phase_meter:
+      name: ${friendly_name_evse} háromfázisú mérés
+      id: evse_threephase
+      on_turn_on:
+        - lvgl.widget.update:
+            id: lvgl_switch_threephase
+            state:
+              checked: true
+      on_turn_off:
+        - lvgl.widget.update:
+            id: lvgl_switch_threephase
+            state:
+              checked: false
+
+number:
+  - platform: template
+    name: ${friendly_name} Képernyő elalvás
+    icon: mdi:receipt-clock-outline
+    optimistic: true
+    entity_category: "config"
+    id: display_timeout
+    unit_of_measurement: "mp"
+    initial_value: 90
+    restore_value: true
+    min_value: 0
+    max_value: 1800
+    step: 5
+    mode: box
+    on_value:
+      - lvgl.slider.update:
+          id: lvgl_slider_settings_screen_sleep
+          value: !lambda return x;
+          
+  - platform: esp32evse
+    esp32evse_id: evse
+    charging_current:
+      name: ${friendly_name_evse} Megengedett töltési áram
+      id: evse_charge_current
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_slider_charging_current
+            value: !lambda |-
+              // Normalizing slider scale to 6 -> maxChCur
+              float min_amps = 6.0;
+              float max_amps = id(var_evse_max_charge_current);
+              if (max_amps < min_amps) max_amps = min_amps;
+              float percent = (x - min_amps) / (max_amps - min_amps);
+              if (percent < 0) percent = 0;
+              if (percent > 1) percent = 1;
+              int slider_val = (int)(percent * 100);
+              return slider_val;
+    default_charging_current:
+      name: ${friendly_name_evse} Alap megengedett töltési áram
+      id: evse_def_charge_current
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_sliderevse_sett_def_chcur
+            value: !lambda |-
+              // Normalizing slider scale to 6 -> maxChCur
+              float min_amps = 6.0;
+              float max_amps = id(var_evse_max_charge_current);
+              if (max_amps < min_amps) max_amps = min_amps;
+              float percent = (x - min_amps) / (max_amps - min_amps);
+              if (percent < 0) percent = 0;
+              if (percent > 1) percent = 1;
+              int slider_val = (int)(percent * 100);
+              return slider_val;
+    maximum_charging_current:
+      name: ${friendly_name_evse} Max megengedett töltési áram
+      id: evse_max_charge_current
+      max_value: 32  # match the electrical limits of your installation
+      on_value:
+        - globals.set:
+            id: var_evse_max_charge_current
+            value: !lambda return x;
+        - lvgl.slider.update:
+            id: lvgl_sliderevse_sett_max_chcur
+            value: !lambda return x;
+    consumption_limit:
+      name: ${friendly_name_evse} Energiamennyiség limit
+      id: evse_consumption_limit
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_slider_session_consumption
+            value: !lambda return x * 10;
+    default_consumption_limit:
+      name: ${friendly_name_evse} Alap energiamennyiség limit
+      id: evse_def_consumption_limit
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_sliderevse_sett_def_consumlim
+            value: !lambda return x * 10;
+    charging_time_limit:
+      name: ${friendly_name_evse} Töltési idő limit
+      id: evse_charge_time_limit
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_slider_session_charging_time
+            value: !lambda return x * 2;
+    default_charging_time_limit:
+      name: ${friendly_name_evse} Alap töltési idő limit
+      id: evse_def_charge_time_limit
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_sliderevse_sett_def_chtimelim
+            value: !lambda return x * 2;
+    under_power_limit:
+      name: ${friendly_name_evse} Teljesítmény alá limit
+      id: evse_underpower_limit
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_slider_session_underpower
+            value: !lambda return x * 10;
+    default_under_power_limit:
+      name: ${friendly_name_evse} Alap teljesítmény alá limit
+      id: evse_def_underpower_limit
+      on_value:
+        - lvgl.slider.update:
+            id: lvgl_sliderevse_sett_def_underpowlim
+            value: !lambda return x * 10;
+
+button:
+  - platform: esp32evse
+    esp32evse_id: evse
+    restart:
+      name: ${friendly_name_evse} újraindítás
+      id: evse_restart
+    authorize:
+      name: ${friendly_name_evse} töltést jóváhagy
+      id: evse_auhorize_charging
+
+  - platform: template
+    name: "Sub ENT"
+    entity_category: diagnostic
+    on_press:
+      - esp32evse.temperature.subscribe: 1s
+      # - lambda: |-
+          # id(evse).at_sub("\"+ENABLE\"", 1000);
+  - platform: template
+    name: "Unsub ENT"
+    entity_category: diagnostic
+    on_press:
+      - esp32evse.temperature.subscribe: never
+      # - lambda: |-
+          # id(evse).at_unsub("\"+ENABLE\"");
+  - platform: template
+    name: "Unsub ALL"
+    entity_category: diagnostic
+    on_press:
+      - esp32evse.unsubscribe_all:
+      # - lambda: |-
+          # id(evse).at_unsub("");
+
+  - platform: template
+    name: ${friendly_name} Frissítés
+    entity_category: diagnostic
+    on_press:
+      - esp32evse.force_update:
+
+  # - platform: restart
+    # id: display_restart
+    # name: ${friendly_name} újraindítás
+    # entity_category: diagnostic
+  # - platform: factory_reset
+    # name: ${friendly_name} gyári reset
+    # entity_category: diagnostic
+  # - platform: safe_mode
+    # name: ${friendly_name} széfmód
+    # entity_category: diagnostic
+
+  - platform: template
+    name: ${friendly_name_ev} Töltőnyílás ki
+    id: evse_toltonyilas_rf
+    # on_press:
+      # - repeat:
+          # count: 10
+          # then:
+            # - remote_transmitter.transmit_raw:
+                # code: [400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -1200, 400, -400, 400, -400, 800, -800, 400, -400, 800, -800, 800, -800, 400, -400, 800, -800, 800, -800, 800, -800, 800, -800, 800, -800, 400, -400, 800, -400, 400, -800, 800, -400, 400, -800, 400, -400, 800, -400, 400, -400, 400, -800, 400, -400, 400, -400, 800, -400, 400, -800, 800, -400, 400, -800, 800, -800, 400, -400, 400, -400, 400, -400, 800, -400, 400, -800, 400, -400, 800, -1200, 400, -400, 400, -400, 800, -800, 400, -400, 800, -800, 800, -800, 400, -400, 800, -800, 800, -800, 800, -800, 800, -800, 800, -800, 400, -400, 800, -400, 400, -800, 800, -400, 400, -800, 400, -400, 800, -400, 400, -400, 400, -800, 400, -400, 400, -400, 800, -400, 400, -800, 800, -400, 400, -800, 800, -800, 400, -400, 400, -400, 400, -400, 800, -400, 400, -800, 400, -400, 800, -1200, 400, -400, 400, -400, 800, -800, 400, -400, 800, -800, 800, -800, 400, -400, 800, -800, 800, -800, 800, -800, 800, -800, 800, -800, 400, -400, 800, -400, 400, -800, 800, -400, 400, -800, 400, -400, 800, -400, 400, -400, 400, -800, 400, -400, 400, -400, 800, -400, 400, -800, 800, -400, 400, -800, 800, -800, 400, -400, 400, -400, 400, -400, 800, -400, 400, -800, 400, -400, 400]
+            # - delay: 25ms
+
+
+font:
+  - file: 'fonts/NotoSans_Condensed-Regular.ttf'
+    id: font_kis
+    size: 16
+    bpp: 4
+    glyphs: [
+      0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzáÁéÉíÍóÓöÖőŐúÚüÜűŰ\/,
+      (,),+,-,_,.,°,•,µ,
+      "\u0020", #space
+      "\u0021", #!
+      "\u0022", #"
+      "\u0025", #%
+      "\u0027", #'
+      "\u002C", #,
+      "\u003A", #:
+      "\u003D", #=
+      "\u003F", #?
+      ]
+
+  - file: 'fonts/NotoSans_Condensed-Regular.ttf'
+    id: font_koz
+    size: 20
+    bpp: 4
+    glyphs: [
+      0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzáÁéÉíÍóÓöÖőŐúÚüÜűŰ\/,
+      (,),+,-,_,.,°,•,µ,
+      "\u0020", #space
+      "\u0021", #!
+      "\u0022", #"
+      "\u0025", #%
+      "\u0027", #'
+      "\u002C", #,
+      "\u003A", #:
+      "\u003D", #=
+      "\u003F", #?
+      ]
+    extras:
+      - file: 'fonts/materialdesignicons-webfont.ttf'
+        glyphs: [
+          "\U000F1C3B", #power-plug-battery
+          "\U000F1AEA", #timer-stop
+          "\U000F0493", #cog
+          "\U000F1C69", #information-slab-circle
+          ]
+
+  - file: 'fonts/NotoSans_Condensed-Regular.ttf'
+    id: font_nagy
+    size: 26
+    bpp: 4
+    glyphs: [
+      0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzáÁéÉíÍóÓöÖőŐúÚüÜűŰ\/,
+      (,),+,-,_,.,°,•,µ,
+      "\u0020", #space
+      "\u0021", #!
+      "\u0022", #"
+      "\u0025", #%
+      "\u0027", #'
+      "\u002C", #,
+      "\u003A", #:
+      "\u003D", #=
+      "\u003F", #?
+      "\u203A", #>small
+      ]
+    extras:
+      - file: 'fonts/from_svg.ttf'
+        glyphs: [
+          "\uE000", #esp32-evse
+          "\uE001", #esphome
+          "\uE002", #tesla
+          ]
+      - file: 'fonts/materialdesignicons-webfont.ttf'
+        glyphs: [
+          "\U000F06D9", #garage
+          "\U000F06DA", #garage-open
+          "\U000F04DD", #store-24-hour
+          ]
+      - file: 'fonts/hass-hue-icons.ttf'
+        glyphs: [
+          "\uEA09", #plafon armatura
+          ]
+
+
+  - file: 'fonts/materialdesignicons-webfont.ttf'
+    id: ikonok_nagy
+    size: 42
+    bpp: 4
+    glyphs: [
+      "\U000F1C3C", #power-plug-battery-outline
+      "\U000F04DD", #store-24-hour, házszám
+      ]
+    extras:
+      - file: 'fonts/from_svg.ttf'
+        glyphs: [
+          "\uE000", #esp32-evse
+          "\uE001", #esphome
+          "\uE002", #tesla logo1
+          "\uE003", #tesla frunk
+          "\uE004", #tesla trunk
+          "\uE005", #tesla window vent
+          "\uE006", #tesla start remote
+          "\uE007", #tesla sentry
+          "\uE008", #tesla lock
+          "\uE009", #tesla horn
+          "\uE00a", #tesla logo2
+          "\uE00b", #tesla juniper
+          ]
+      - file: 'fonts/openhasplite_robi.ttf'
+        glyphs: [
+          "\u0676", #garage 100
+          "\u0677", #garage 66
+          "\u0678", #garage 33
+          "\u0679", #garage 0
+          "\uE05D", #nyíl fel
+          "\uE045", #nyíl le
+          "\uE4DB", #stop
+          "\u0659", #plafon lámpa kocka
+          "\u067C", #plafon armatura
+          "\u067D", #házikó
+          ]
+      # - file: 'fonts/FontAwesome5-Solid+Brands+Regular.woff'
+        # glyphs: [
+          # "\uF015", #házikó
+          # ]
+      # - file: 'fonts/materialdesignicons-webfont-robi.ttf'
+        # glyphs: [
+          # "\uE7CA", #home-assistant
+
+  - file: 'fonts/materialdesignicons-webfont.ttf'
+    id: icons_28_konyha_light
+    size: 28
+    bpp: 4
+    glyphs: [
+      "\U000F0876", #glass-wine szaletli
+      ]
+    extras:
+      - file: 'fonts/openhasplite_robi.ttf'
+        glyphs: [
+          "\u065D", #kert
+          ]
+
+image:
+  - file: 'inc/ev-notcharging-robi.svg'
+    id: ev_battery
+    type: rgb565
+    transparency: alpha_channel
+    resize: 450x450
+
+lvgl:
+  buffer_size: 100%
+  log_level: WARN
+  color_depth: 16
+  default_font: font_koz
+  on_idle:
+    - timeout: !lambda "return (id(display_timeout).state * 1000);"
+      then:
+        - logger.log: "LVGL is idle"
+        - script.execute: set_display_idle
+    - timeout: 5min
+      then:
+        - lvgl.tabview.select:
+            id: tab_evse_main
+            index: 0
+        - lvgl.tabview.select:
+            id: tab_evse
+            index: 0
+  on_resume:
+    - esp32evse.force_update:
+
+  top_layer:
+    widgets:
+      - obj:
+          id: lvgl_authorize_popup_window
+          hidden: true
+          x: 0
+          y: 0
+          width: 100%
+          height: 100%
+          bg_color: 0
+          bg_opa: 50%
+          radius: 0
+          pad_all: 0
+          border_width: 0
+          widgets:
+          - obj:
+              align: CENTER
+              height: 80%
+              width: 80%
+              radius: 10
+              pad_all: 6
+              widgets:
+                - label:
+                    text: "Töltés jóváhagyása szükséges"
+                    width: 100%
+                    text_align: CENTER
+                - button:
+                    align: CENTER
+                    width: 70%
+                    height: 40%
+                    y: 10
+                    widgets:
+                      - label:
+                          align: center
+                          text: "Töltést jóváhagyom"
+                          text_font: font_nagy
+                    on_press:
+                      - button.press: evse_auhorize_charging
+                      - lvgl.widget.hide: lvgl_authorize_popup_window
+
+  pages:
+    - id: page_evse
+      pad_all: 0
+      widgets:
+        - tabview:
+            id: tab_evse
+            position: LEFT
+            size: 15%
+            content_style:
+              scrollable: false
+            tab_style:
+                items:
+                    text_align: center
+                    text_font: ikonok_nagy
+            # on_value:
+              # then:
+                # - if:
+                    # condition:
+                      # lambda: return tab == id(tab_evse_charger);
+                    # then:
+                      # - esp32evse.force_update:
+            tabs:
+                - name: "\uE000"
+                  id: tab_evse_charger
+                  pad_all: 0
+                  widgets:
+                    - tabview:
+                        id: tab_evse_main
+                        position: BOTTOM
+                        content_style:
+                            scrollable: false
+                        tab_style:
+                            items:
+                                text_align: center
+                        tabs:
+                            - name: "Menet"
+                              text_align: CENTER
+                              scrollable: false
+                              widgets:
+                                  - label:
+                                      text: "Kérem, várjon..."
+                                      id: lvgl_label_charging_statusmsg
+                                      text_font: font_nagy
+                                  - obj:
+                                      align: CENTER
+                                      height: 90%
+                                      width: 100%
+                                      border_width: 0
+                                      bg_opa: TRANSP
+                                      pad_all: 6
+                                      pad_top: 0
+                                      pad_right: 12
+                                      y: 25
+                                      scrollable: false
+                                      layout:
+                                          type: GRID
+                                          grid_columns: [FR(60), FR(20), FR(20)]
+                                          grid_rows: [40, 22, 22, 20, 20, 20, 20, 20]
+                                          multiple_widgets_per_cell: true
+                                          #pad_row: 12
+                                          #pad_column: 10
+                                      widgets:
+                                        - switch:
+                                            id: lvgl_switch_charging
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: CENTER
+                                            grid_cell_column_span: 1
+                                            width: 70
+                                            height: 40
+                                        - obj: # transparent zone above the switch and the label to catch clicks on the entire row
+                                            id: lvgl_obj_switch_charging
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: CENTER
+                                            grid_cell_column_span: 1
+                                            width: 100%
+                                            height: 40
+                                            clickable: true
+                                            scrollable: false
+                                            border_width: 0
+                                            pad_all: 0
+                                            bg_opa: TRANSP
+                                            widgets:
+                                              - label:
+                                                  id: lvgl_label_charging_enabled
+                                                  align: LEFT_MID
+                                                  clickable: false
+                                                  text: "Ismeretlen állapot"
+                                                  x: 85
+                                            on_release:
+                                              - switch.toggle: evse_enable_charge
+                                        - label:
+                                            text: "Megengedett töltési áram:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 1
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_charging_current
+                                            text: "-.- A"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 1
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - slider:
+                                            id: lvgl_slider_charging_current
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: START
+                                            grid_cell_column_span: 3
+                                            width: 95%
+                                            min_value: 0
+                                            max_value: 100
+                                            on_value:
+                                              - globals.set:
+                                                  id: var_evse_ses_charge_current
+                                                  value: !lambda |-
+                                                    // Normalizing slider min -> max to 6 -> maxChCur
+                                                    float percent = x / 100.0;
+                                                    float min_amps = 6.0;
+                                                    float max_amps = id(var_evse_max_charge_current);
+                                                    if (max_amps < min_amps) max_amps = min_amps;
+                                                    float amps = min_amps + percent * (max_amps - min_amps);
+                                                    return amps;
+                                              - lvgl.label.update:
+                                                  id: lvgl_label_charging_current
+                                                  text:
+                                                    format: "%.1f A"
+                                                    args: [ 'id(var_evse_ses_charge_current)' ]
+                                            on_release:
+                                              - number.set:
+                                                  id: evse_charge_current
+                                                  value: !lambda return id(var_evse_ses_charge_current);
+                                        - label:
+                                            text: "Menet időtartama:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 3
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_charging_session_time
+                                            text: "-"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 3
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - label:
+                                            text: "Töltés időtartama:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 4
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_charging_charging_time
+                                            text: "-"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 4
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - label:
+                                            text: "Vételezett energiamennyiség:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 5
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_charging_energy_consumed
+                                            text: "-.- kWh"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 5
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - label:
+                                            text: "Aktuális teljesítmény:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 6
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_charging_power
+                                            text: "-.- kW"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 6
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+
+                            - name: "Terhelés"
+                              text_align: CENTER
+                              scrollable: FALSE
+                              y: 20
+                              widgets:
+                                - label:
+                                    text: "Terhelés"
+                                    text_font: font_nagy
+                                - obj:
+                                    align: CENTER
+                                    height: 90%
+                                    width: 100%
+                                    pad_all: 6
+                                    y: 20
+                                    scrollable: false
+                                    layout:
+                                        type: GRID
+                                        grid_columns: [FR(34), FR(22), FR(22), FR(22)]
+                                        grid_rows: [FR(20), FR(40), FR(40)]
+                                    widgets:
+                                        - label:
+                                            id: lvgl_label_meter_power
+                                            text: "Teljesítmény"
+                                            text_font: font_nagy
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: CENTER
+                                        - label:
+                                            text: "Áramerősség"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 1
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: CENTER
+                                        - label:
+                                            text: "Feszültség"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: CENTER
+                                        - label:
+                                            text: "L1"
+                                            text_font: font_nagy
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: CENTER
+                                        - <<: !include
+                                            file: pak/lvgl_semicircle_meter_ev.yaml
+                                            vars:
+                                              col: 1
+                                              row: 1
+                                              clr_start: 0x3399ff
+                                              clr_end: 0x33ccff
+                                              id_needle: lvgl_needle_mains_current_l1
+                                              id_text_value: lvgl_label_mains_current_l1
+                                              font_text_value: font_kis
+                                              font_text_label: font_nagy
+                                              text_label: "A"
+                                              max_range: 105
+                                        - <<: !include
+                                            file: pak/lvgl_semicircle_meter_ev.yaml
+                                            vars:
+                                              col: 1
+                                              row: 2
+                                              clr_start: 0xff8b33
+                                              clr_end: 0xffbb33
+                                              id_needle: lvgl_needle_mains_voltage_l1
+                                              id_text_value: lvgl_label_mains_voltage_l1
+                                              font_text_value: font_kis
+                                              font_text_label: font_nagy
+                                              text_label: "V"
+                                              max_range: 260
+
+                                        - label:
+                                            text: "L2"
+                                            text_font: font_nagy
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: CENTER
+                                        - <<: !include
+                                            file: pak/lvgl_semicircle_meter_ev.yaml
+                                            vars:
+                                              col: 2
+                                              row: 1
+                                              clr_start: 0x3399ff
+                                              clr_end: 0x33ccff
+                                              id_needle: lvgl_needle_mains_current_l2
+                                              id_text_value: lvgl_label_mains_current_l2
+                                              font_text_value: font_kis
+                                              font_text_label: font_nagy
+                                              text_label: "A"
+                                              max_range: 105
+                                        - <<: !include
+                                            file: pak/lvgl_semicircle_meter_ev.yaml
+                                            vars:
+                                              col: 2
+                                              row: 2
+                                              clr_start: 0xff8b33
+                                              clr_end: 0xffbb33
+                                              id_needle: lvgl_needle_mains_voltage_l2
+                                              id_text_value: lvgl_label_mains_voltage_l2
+                                              font_text_value: font_kis
+                                              font_text_label: font_nagy
+                                              text_label: "V"
+                                              max_range: 260
+
+                                        - label:
+                                            text: "L3"
+                                            text_font: font_nagy
+                                            grid_cell_column_pos: 3
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: CENTER
+                                        - <<: !include
+                                            file: pak/lvgl_semicircle_meter_ev.yaml
+                                            vars:
+                                              col: 3
+                                              row: 1
+                                              clr_start: 0x3399ff
+                                              clr_end: 0x33ccff
+                                              id_needle: lvgl_needle_mains_current_l3
+                                              id_text_value: lvgl_label_mains_current_l3
+                                              font_text_value: font_kis
+                                              font_text_label: font_nagy
+                                              text_label: "A"
+                                              max_range: 105 #33
+                                        - <<: !include
+                                            file: pak/lvgl_semicircle_meter_ev.yaml
+                                            vars:
+                                              col: 3
+                                              row: 2
+                                              clr_start: 0xff8b33
+                                              clr_end: 0xffbb33
+                                              id_needle: lvgl_needle_mains_voltage_l3
+                                              id_text_value: lvgl_label_mains_voltage_l3
+                                              font_text_value: font_kis
+                                              font_text_label: font_nagy
+                                              text_label: "V"
+                                              max_range: 260
+                            - name: "Korlát"
+                              text_align: CENTER
+                              scrollable: FALSE
+                              widgets:
+                                  - label:
+                                      text: "Töltés leállítása ha:"
+                                      text_font: font_nagy
+                                  - obj:
+                                      align: CENTER
+                                      height: 85%
+                                      width: 100%
+                                      border_width: 0
+                                      bg_opa: TRANSP
+                                      pad_all: 6
+                                      pad_top: 0
+                                      pad_right: 16
+                                      y: 25
+                                      scroll_momentum: false
+                                      layout:
+                                          type: GRID
+                                          grid_columns: [FR(60), FR(20), FR(20)]
+                                          grid_rows: [25, 25, 25, 25, 25, 25]
+                                          pad_row: 12
+                                          pad_column: 10
+                                      widgets:
+                                        - label:
+                                            text: "Vételezett energiamennyiség elért:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_session_consumption
+                                            text: "-.- kWh"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - slider:
+                                            id: lvgl_slider_session_consumption
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 1
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: START
+                                            grid_cell_column_span: 3
+                                            adv_hittest: true
+                                            width: 95%
+                                            min_value: 0
+                                            max_value: 1000
+                                            on_value:
+                                              - lvgl.label.update:
+                                                  id: lvgl_label_session_consumption
+                                                  text: !lambda |-
+                                                    if (x == 0) {
+                                                        return "nincs";
+                                                    } else {
+                                                        static char buf[10];
+                                                        snprintf(buf, sizeof(buf), "%.1f kWh", x / 10);
+                                                        return buf;
+                                                    }
+                                            on_release:
+                                              - number.set:
+                                                  id: evse_consumption_limit
+                                                  value: !lambda return x / 10;
+                                        - label:
+                                            text: "Töltési idő elért:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_session_charging_time
+                                            text: "- perc"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - slider:
+                                            id: lvgl_slider_session_charging_time
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 3
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: START
+                                            grid_cell_column_span: 3
+                                            adv_hittest: true
+                                            width: 95%
+                                            min_value: 0
+                                            max_value: 48
+                                            on_value:
+                                              - lvgl.label.update:
+                                                  id: lvgl_label_session_charging_time
+                                                  text: !lambda |-
+                                                    if (x == 0) {
+                                                        return "nincs";
+                                                    } else {
+                                                        return formatNiceTime(int(x * 1800));
+                                                    }
+                                            on_release:
+                                              - number.set:
+                                                  id: evse_charge_time_limit
+                                                  value: !lambda return x / 2;
+                                        - label:
+                                            text: "Teljesítmény alá csökkent:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 4
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_session_underpower
+                                            text: "-.- kW"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 4
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - slider:
+                                            id: lvgl_slider_session_underpower
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 5
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: START
+                                            grid_cell_column_span: 3
+                                            adv_hittest: true
+                                            width: 95%
+                                            min_value: 0
+                                            max_value: 100
+                                            on_value:
+                                              - lvgl.label.update:
+                                                  id: lvgl_label_session_underpower
+                                                  text: !lambda |-
+                                                    if (x == 0) {
+                                                        return "nincs";
+                                                    } else {
+                                                        static char buf[10];
+                                                        snprintf(buf, sizeof(buf), "%.1f kW", x / 10);
+                                                        return buf;
+                                                    }
+                                            on_release:
+                                              - number.set:
+                                                  id: evse_underpower_limit
+                                                  value: !lambda return x / 10;
+
+                            - name: "Beállítás"
+                              text_align: CENTER
+                              scrollable: FALSE
+                              widgets:
+                                  - label:
+                                      text: "ESP32-EVSE Beállítások"
+                                      text_font: font_nagy
+                                  - obj:
+                                      align: CENTER
+                                      height: 85%
+                                      width: 100%
+                                      border_width: 0
+                                      bg_opa: TRANSP
+                                      pad_all: 6
+                                      pad_top: 0
+                                      pad_right: 16
+                                      y: 25
+                                      scroll_momentum: false
+                                      layout:
+                                          type: GRID
+                                          grid_columns: [FR(60), FR(20), FR(20)]
+                                          grid_rows: [25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25, 25]
+                                          pad_row: 12
+                                          pad_column: 10
+                                      widgets:
+                                        - label:
+                                            text: "Alapértelmezett töltési áram:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_evse_sett_def_chcur
+                                            text: "- A"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - slider:
+                                            id: lvgl_sliderevse_sett_def_chcur
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 1
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: START
+                                            grid_cell_column_span: 3
+                                            width: 95%
+                                            adv_hittest: true
+                                            min_value: 0
+                                            max_value: 100
+                                            on_value:
+                                              - globals.set:
+                                                  id: var_evse_def_charge_current
+                                                  value: !lambda |-
+                                                    // Normalizing slider min -> max to 6 -> maxChCur
+                                                    float percent = x / 100.0;
+                                                    float min_amps = 6.0;
+                                                    float max_amps = id(var_evse_max_charge_current);
+                                                    if (max_amps < min_amps) max_amps = min_amps;
+                                                    float amps = min_amps + percent * (max_amps - min_amps);
+                                                    return amps;
+                                              - lvgl.label.update:
+                                                  id: lvgl_label_evse_sett_def_chcur
+                                                  text:
+                                                    format: "%.1f A"
+                                                    args: [ 'id(var_evse_def_charge_current)' ]
+                                            on_release:
+                                              - number.set:
+                                                  id: evse_def_charge_current
+                                                  value: !lambda return id(var_evse_def_charge_current);
+                                        - label:
+                                            text: "Alapértelmezett energiamennyiség:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_evse_sett_def_consumlim
+                                            text: "nincs"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - slider:
+                                            id: lvgl_sliderevse_sett_def_consumlim
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 3
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: START
+                                            grid_cell_column_span: 3
+                                            width: 95%
+                                            adv_hittest: true
+                                            min_value: 0
+                                            max_value: 1000
+                                            on_value:
+                                              - lvgl.label.update:
+                                                  id: lvgl_label_evse_sett_def_consumlim
+                                                  text: !lambda |-
+                                                    if (x == 0) {
+                                                        return "nincs";
+                                                    } else {
+                                                        static char buf[10];
+                                                        snprintf(buf, sizeof(buf), "%.1f kWh", x / 10);
+                                                        return buf;
+                                                    }
+                                            on_release:
+                                              - number.set:
+                                                  id: evse_def_consumption_limit
+                                                  value: !lambda return x/10;
+                                        - label:
+                                            text: "Alapértelmezett töltési időlimit:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 4
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_evse_sett_def_chtimelim
+                                            text: "nincs"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 4
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - slider:
+                                            id: lvgl_sliderevse_sett_def_chtimelim
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 5
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: START
+                                            grid_cell_column_span: 3
+                                            width: 95%
+                                            adv_hittest: true
+                                            min_value: 0
+                                            max_value: 48
+                                            on_value:
+                                              - lvgl.label.update:
+                                                  id: lvgl_label_evse_sett_def_chtimelim
+                                                  text: !lambda |-
+                                                    if (x == 0) {
+                                                        return "nincs";
+                                                    } else {
+                                                        return formatNiceTime(int(x * 1800));
+                                                    }
+                                            on_release:
+                                              - number.set:
+                                                  id: evse_def_charge_time_limit
+                                                  value: !lambda return x/2;
+                                        - label:
+                                            text: "Alapértelmezett teljesítmény aláesés:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 6
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_evse_sett_def_underpowlim
+                                            text: "nincs"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 6
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - slider:
+                                            id: lvgl_sliderevse_sett_def_underpowlim
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 7
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: START
+                                            grid_cell_column_span: 3
+                                            width: 95%
+                                            adv_hittest: true
+                                            min_value: 0
+                                            max_value: 100
+                                            on_value:
+                                              - lvgl.label.update:
+                                                  id: lvgl_label_evse_sett_def_underpowlim
+                                                  text: !lambda |-
+                                                    if (x == 0) {
+                                                        return "nincs";
+                                                    } else {
+                                                        static char buf[10];
+                                                        snprintf(buf, sizeof(buf), "%.1f kW", x / 10);
+                                                        return buf;
+                                                    }
+                                            on_release:
+                                              - number.set:
+                                                  id: evse_def_underpower_limit
+                                                  value: !lambda return x / 10;
+                                        - label:
+                                            id: lvgl_label_charger_available
+                                            text: "Töltésvezérlő üzemképes:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 8
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: CENTER
+                                        - switch:
+                                            id: lvgl_switch_available
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 8
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                            grid_cell_column_span: 1
+                                            on_release:
+                                              - switch.toggle: evse_available
+                                        - label:
+                                            id: lvgl_label_charger_reqauth
+                                            text: "Jóváhagyás szükséges:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 9
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: CENTER
+                                        - switch:
+                                            id: lvgl_switch_reqauth
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 9
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                            grid_cell_column_span: 1
+                                            on_release:
+                                              - switch.toggle: evse_reqauth
+                                        - label:
+                                            id: lvgl_label_charger_threephase
+                                            text: "Háromfázisú mérés:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 10
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: CENTER
+                                        - switch:
+                                            id: lvgl_switch_threephase
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 10
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                            grid_cell_column_span: 1
+                                            on_release:
+                                              - switch.toggle: evse_threephase
+                                        - label:
+                                            text: "Maximálisan megengedett töltési áram:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 11
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_evse_sett_max_chcur
+                                            text: "- A"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 11
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - slider:
+                                            id: lvgl_sliderevse_sett_max_chcur
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 12
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: START
+                                            grid_cell_column_span: 3
+                                            width: 95%
+                                            adv_hittest: true
+                                            value: 16
+                                            min_value: 6
+                                            max_value: 32 #63
+                                            on_value:
+                                              - lvgl.label.update:
+                                                  id: lvgl_label_evse_sett_max_chcur
+                                                  text:
+                                                    format: "%.0f A"
+                                                    args: [ 'x' ]
+                                            on_release:
+                                              - number.set:
+                                                  id: evse_max_charge_current
+                                                  value: !lambda return x;
+                                              - esp32evse.force_update:
+
+                            - name: "Állapot"
+                              text_align: CENTER
+                              scrollable: FALSE
+                              widgets:
+                                  - label:
+                                      text: "\uE000 ESP32-EVSE"
+                                      text_font: font_nagy
+                                  - obj:
+                                      align: CENTER
+                                      height: 90%
+                                      width: 100%
+                                      pad_all: 6
+                                      pad_right: 12
+                                      y: 20
+                                      scroll_momentum: false
+                                      layout:
+                                          type: GRID
+                                          grid_columns: [FR(40), FR(60)]
+                                          grid_rows:
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                            - CONTENT
+                                      widgets:
+                                        - label:
+                                            text: "J1772 állapot"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_statusmsg
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Jóváhagyásra vár"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 1
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_pendauth
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 1
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Beállított limit elérve"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_limreach
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Össz vételezett energiamennyiség"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 3
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_total_energy
+                                            text: "- kWh"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 3
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Hőmérséklet"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 4
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_temphi
+                                            text: "- °C"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 4
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Futási idő"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 5
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_uptime
+                                            text: "- s"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 5
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Pilot jel"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 6
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_pilot_fault
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 6
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Dióda rövidzár"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 7
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_diode_short
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 7
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Hibaáram védelem"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 8
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_rcm_triggered
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 8
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Hibaáram érzékelő önteszt"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 9
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_selftest_fault
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 9
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Magas hőmérséklet figyelmeztetés"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 10
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_temp_high
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 10
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Hőmérséklet érzékelő hiba"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 11
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_temp_fault
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 11
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Eszköznév"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 12
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_devname
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 12
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Verzió"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 13
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_fwevse
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 13
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Wi-Fi csatlakozva"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 14
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_wifi_connected
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 14
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Wi-Fi jelerősség"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 15
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_wifi_signal_db
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 15
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "IP cím"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 16
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_ipevse
+                                            text: "-.-.-.-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 16
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Heap used"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 17
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_heapevse_used
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 17
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Heap max"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 18
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_heapevse_max
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 18
+                                            grid_cell_x_align: END
+                                        - button:
+                                            id: lvgl_button_info_update_evse
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 19
+                                            grid_cell_x_align: START
+                                            height: 27
+                                            width: 48%
+                                            widgets:
+                                            - label:
+                                                align: CENTER
+                                                text: "Frissítés"
+                                            on_release:
+                                              - esp32evse.force_update:
+                                        - button:
+                                            id: lvgl_button_info_reboot_evse
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 19
+                                            grid_cell_x_align: END
+                                            height: 27
+                                            width: 48%
+                                            widgets:
+                                            - label:
+                                                align: CENTER
+                                                text: "Újraindítás"
+                                            on_release:
+                                              - button.press: evse_restart
+                - name: "\uE001"
+                  id: tab_settings
+                  pad_all: 0
+                  widgets:
+                    - tabview:
+                        id: tab_setings_main
+                        position: BOTTOM
+                        content_style:
+                            scrollable: false
+                        tab_style:
+                            items:
+                                text_align: center
+                        tabs:
+                            - name: "Beállítások"
+                              text_align: CENTER
+                              scrollable: FALSE
+                              widgets:
+                                  - label:
+                                      text: "Beállítások"
+                                      text_font: font_nagy
+                                  - obj:
+                                      align: CENTER
+                                      height: 85%
+                                      width: 100%
+                                      border_width: 0
+                                      bg_opa: TRANSP
+                                      pad_all: 6
+                                      pad_top: 0
+                                      pad_right: 12
+                                      y: 30
+                                      scroll_momentum: false
+                                      layout:
+                                          type: GRID
+                                          grid_columns: [FR(60), FR(20), FR(20)]
+                                          grid_rows: [25, 25, 25, 25]
+                                          pad_row: 12
+                                          pad_column: 10
+                                      widgets:
+                                        - label:
+                                            text: "Képernyő fényereje:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_settings_screen_bright
+                                            text: "- %"
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - slider:
+                                            id: lvgl_slider_settings_screen_bright
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 1
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: START
+                                            grid_cell_column_span: 3
+                                            width: 95%
+                                            adv_hittest: true
+                                            min_value: 10
+                                            max_value: 100
+                                            on_release:
+                                              - light.turn_on:
+                                                  id: display_backlight
+                                                  brightness: !lambda return x/100;
+                                            on_value:
+                                                - lvgl.label.update:
+                                                    id: lvgl_label_settings_screen_bright
+                                                    text:
+                                                      format: "%.0f%%"
+                                                      args: [ 'x' ]
+                                        - label:
+                                            text: "Képernyő elalvási ideje:"
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: START
+                                            grid_cell_y_align: END
+                                        - label:
+                                            id: lvgl_label_settings_screen_sleep
+                                            text: "- mp."
+                                            grid_cell_column_pos: 2
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: END
+                                            grid_cell_y_align: END
+                                        - slider:
+                                            id: lvgl_slider_settings_screen_sleep
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 3
+                                            grid_cell_x_align: CENTER
+                                            grid_cell_y_align: START
+                                            grid_cell_column_span: 3
+                                            width: 95%
+                                            adv_hittest: true
+                                            min_value: 0
+                                            max_value: 1800
+                                            on_value:
+                                              - lvgl.label.update:
+                                                  id: lvgl_label_settings_screen_sleep
+                                                  text: !lambda |-
+                                                    if (x == 0) {
+                                                        return "-";
+                                                    } else {
+                                                        return formatNiceTime(int(x));
+                                                    }                               
+                                            on_release:
+                                              - number.set:
+                                                  id: display_timeout
+                                                  value: !lambda return x;
+
+                            - name: "Kijelző állapot"
+                              text_align: CENTER
+                              scrollable: FALSE
+                              widgets:
+                                  - label:
+                                      text: "\uE001 ESPHome"
+                                      text_font: font_nagy
+                                  - obj:
+                                      align: CENTER
+                                      height: 90%
+                                      width: 100%
+                                      pad_all: 6
+                                      pad_right: 12
+                                      y: 20
+                                      scroll_momentum: false
+                                      layout:
+                                          type: GRID
+                                          grid_columns: [FR(40), FR(60)]
+                                          grid_rows: [CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT, CONTENT]
+                                      widgets:
+                                        - label:
+                                            text: "Futási idő"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_uptime_disp
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 0
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Verzió"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 1
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_fwdisp
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 1
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "IP cím"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_ipdisp
+                                            text: "-.-.-.-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 2
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Heap szabad"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 3
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_heapdisp_free
+                                            text: "-/-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 3
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Heap max blokk"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 4
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_heapdisp_max
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 4
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Ciklus idő"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 5
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_disploop
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 5
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "Wi-Fi jelerősség"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 6
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_disp_wifi_signal_db
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 6
+                                            grid_cell_x_align: END
+                                        - label:
+                                            text: "API csatlakozás"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 7
+                                            grid_cell_x_align: START
+                                        - label:
+                                            id: lvgl_label_info_disp_api_connected
+                                            text: "-"
+                                            text_font: font_kis
+                                            grid_cell_column_pos: 1
+                                            grid_cell_row_pos: 7
+                                            grid_cell_x_align: END
+                                        - button:
+                                            id: lvgl_button_info_reboot_display
+                                            grid_cell_column_pos: 0
+                                            grid_cell_row_pos: 8
+                                            grid_cell_x_align: START
+                                            height: 27
+                                            width: 48%
+                                            widgets:
+                                            - label:
+                                                align: CENTER
+                                                text: "Újraindítás"
+                                            # on_release:
+                                              # - button.press: display_restart
+                - name: "\uE00b"
+                  id: tab_tesla
+                  pad_all: 0
+                  widgets:
+                    - tabview:
+                        id: tab_tesla_main
+                        position: BOTTOM
+                        content_style:
+                            scrollable: false
+                        tab_style:
+                            items:
+                                text_align: center
+                        tabs:
+                            - name: "Autó"
+                              text_align: CENTER
+                              scrollable: FALSE
+                              widgets:
+                                  - label:
+                                      text: "Tesla Model Y Juniper"
+                                      text_font: font_nagy
+
+                                  - obj:
+                                      align: CENTER
+                                      height: 100%
+                                      width: 100%
+                                      border_width: 0
+                                      bg_opa: TRANSP
+                                      pad_all: 0
+                                      scrollable: false
+                                      widgets:
+
+
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 344
+                                            id: battbar_1t
+                                            min_value: -2
+                                            max_value: 100
+                                            width: 125
+                                            height: 8
+                                            radius: 0
+                                            x: -28
+                                            y: 0
+                                            bg_opa: 0%
+                                            indicator:
+                                              bg_color: 0x00C469 #
+                                              border_width: 0
+                                            mode: RANGE
+                                            start_value: 80
+                                            value: 81
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 344
+                                            id: battbar_2t
+                                            min_value: -2
+                                            max_value: 100
+                                            width: 126
+                                            height: 8
+                                            radius: 0
+                                            x: -17
+                                            y: 6
+                                            bg_opa: 0%
+                                            indicator:
+                                              bg_color: 0x00C469 #
+                                              border_opa: 100%
+                                              bg_opa: 100%
+                                            mode: RANGE
+                                            start_value: 80
+                                            value: 81
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 344
+                                            id: battbar_3t
+                                            min_value: -2
+                                            max_value: 100
+                                            width: 127
+                                            height: 8
+                                            radius: 0
+                                            x: -8
+                                            y: 12
+                                            bg_opa: 0%
+                                            indicator:
+                                              bg_color: 0x00C469 #
+                                              border_width: 0
+                                            mode: RANGE
+                                            start_value: 80
+                                            value: 81
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 344
+                                            id: battbar_4t
+                                            min_value: -2
+                                            max_value: 100
+                                            width: 128
+                                            height: 8
+                                            radius: 0
+                                            x: 2
+                                            y: 18
+                                            bg_opa: 0%
+                                            indicator:
+                                              bg_color: 0x00C469 #
+                                              border_width: 0
+                                            mode: RANGE
+                                            start_value: 80
+                                            value: 81
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 344
+                                            id: battbar_5t
+                                            min_value: -2
+                                            max_value: 100
+                                            width: 132
+                                            height: 8
+                                            radius: 0
+                                            x: 12
+                                            y: 24
+                                            bg_opa: 0%
+                                            indicator:
+                                              bg_color: 0x00C469 #
+                                              border_width: 0
+                                            mode: RANGE
+                                            start_value: 80
+                                            value: 81
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 344
+                                            id: battbar_6t
+                                            min_value: -2
+                                            max_value: 100
+                                            width: 133
+                                            height: 8
+                                            radius: 0
+                                            x: 23
+                                            y: 31
+                                            bg_opa: 0%
+                                            indicator:
+                                              bg_color: 0x00C469 #
+                                              border_width: 0
+                                            mode: RANGE
+                                            start_value: 80
+                                            value: 81
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 343
+                                            id: battbar_7t
+                                            min_value: -2
+                                            max_value: 100
+                                            width: 133
+                                            height: 8
+                                            radius: 0
+                                            x: 34
+                                            y: 38
+                                            bg_opa: 0%
+                                            indicator:
+                                              bg_color: 0x00C469 #
+                                              border_width: 0
+                                            mode: RANGE
+                                            start_value: 80
+                                            value: 81
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 342
+                                            id: battbar_8t
+                                            min_value: -2
+                                            max_value: 100
+                                            width: 133
+                                            height: 8
+                                            radius: 0
+                                            x: 44
+                                            y: 44
+                                            bg_opa: 0%
+                                            indicator:
+                                              bg_color: 0x00C469 #
+                                              border_width: 0
+                                            mode: RANGE
+                                            start_value: 80
+                                            value: 81
+
+
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 344
+                                            id: battbar_1
+                                            value: 75
+                                            min_value: 0
+                                            max_value: 100
+                                            width: 125
+                                            height: 8
+                                            radius: 0
+                                            x: -28
+                                            y: 0
+                                            bg_color: 0x00C469
+                                            indicator:
+                                              bg_color: 0x00C469
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 344
+                                            id: battbar_2
+                                            value: 75
+                                            min_value: 0
+                                            max_value: 100
+                                            width: 126
+                                            height: 8
+                                            radius: 0
+                                            x: -17
+                                            y: 6
+                                            bg_color: 0x00C469
+                                            indicator:
+                                              bg_color: 0x00C469
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 344
+                                            id: battbar_3
+                                            value: 75
+                                            min_value: 0
+                                            max_value: 100
+                                            width: 127
+                                            height: 8
+                                            radius: 0
+                                            x: -8
+                                            y: 12
+                                            bg_color: 0x00C469
+                                            indicator:
+                                              bg_color: 0x00C469
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 344
+                                            id: battbar_4
+                                            value: 75
+                                            min_value: 0
+                                            max_value: 100
+                                            width: 128
+                                            height: 8
+                                            radius: 0
+                                            x: 2
+                                            y: 18
+                                            bg_color: 0x00C469
+                                            indicator:
+                                              bg_color: 0x00C469
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 344
+                                            id: battbar_5
+                                            value: 75
+                                            min_value: 0
+                                            max_value: 100
+                                            width: 132
+                                            height: 8
+                                            radius: 0
+                                            x: 12
+                                            y: 24
+                                            bg_color: 0x00C469
+                                            indicator:
+                                              bg_color: 0x00C469
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 344
+                                            id: battbar_6
+                                            value: 75
+                                            min_value: 0
+                                            max_value: 100
+                                            width: 133
+                                            height: 8
+                                            radius: 0
+                                            x: 23
+                                            y: 31
+                                            bg_color: 0x00C469
+                                            indicator:
+                                              bg_color: 0x00C469
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 343
+                                            id: battbar_7
+                                            value: 75
+                                            min_value: 0
+                                            max_value: 100
+                                            width: 133
+                                            height: 8
+                                            radius: 0
+                                            x: 34
+                                            y: 38
+                                            bg_color: 0x00C469
+                                            indicator:
+                                              bg_color: 0x00C469
+                                        - bar:
+                                            align: CENTER
+                                            transform_angle: 342
+                                            id: battbar_8
+                                            value: 75
+                                            min_value: 0
+                                            max_value: 100
+                                            width: 133
+                                            height: 8
+                                            radius: 0
+                                            x: 44
+                                            y: 44
+                                            bg_color: 0x00C469
+                                            indicator:
+                                              bg_color: 0x00C469
+
+                                        - image:
+                                            align: CENTER
+                                            x: 2
+                                            src: ev_battery
+                                            id: img_ev_battery
+                                        - label:
+                                            id: lvgl_label_tesla_charge_state
+                                            text: "---%"
+                                            text_font: font_nagy
+                                            align: CENTER
+                                            x: -48
+                                            y: -16
+                                            transform_angle: 345
+                                            width: 160
+                                        - label:
+                                            id: lvgl_label_tesla_battery_range
+                                            text: "---km"
+                                            hidden: true
+                                            text_font: font_nagy
+                                            align: CENTER
+                                            x: 64
+                                            y: 92
+                                            transform_angle: 340
+                                            width: 160
+
+                                        - label:
+                                            id: lvgl_label_tesla_odometer
+                                            text: "389km"
+                                            text_font: font_nagy
+                                            align: CENTER
+                                            x: 64
+                                            y: 92
+                                            transform_angle: 340
+                                            width: 160
+                                        - label:
+                                            id: lvgl_label_tesla_img_power
+                                            text: "kW"
+                                            text_font: font_nagy
+                                            align: TOP_LEFT
+                                            width: 80
+                                            y: 35
+                                        - label:
+                                            id: lvgl_label_tesla_mins_to_limit
+                                            text: "min"
+                                            text_font: font_nagy
+                                            align: TOP_LEFT
+                                            text_align: RIGHT
+                                            width: 110
+                                            x: 80
+                                            y: 35
+
+                                  - slider:
+                                      align: BOTTOM_LEFT
+                                      width: 50%
+                                      id: tesla_charge_statee
+                                      min_value: 0
+                                      max_value: 100
+                                      on_value:
+                                        - lvgl.bar.update:
+                                            id: 
+                                              - battbar_1
+                                              - battbar_2
+                                              - battbar_3
+                                              - battbar_4
+                                              - battbar_5
+                                              - battbar_6
+                                              - battbar_7
+                                              - battbar_8
+                                            value: !lambda return x;
+                                        - lvgl.label.update:
+                                            id: lvgl_label_tesla_charge_state
+                                            text: !lambda |-
+                                              char buf[40];
+                                              int curr = (int) id(tesla_charge_statee).state;
+                                              int maxs = (int) id(tesla_max_soce).state;
+                                              if (curr >= maxs) {
+                                                snprintf(buf, sizeof(buf), "%d%%", curr);
+                                              } else {
+                                                snprintf(buf, sizeof(buf), "%d\u203A%d%%", curr, maxs);
+                                              }
+                                              return {buf};
+ 
+
+
+                                  - slider:
+                                      align: BOTTOM_RIGHT
+                                      width: 50%
+                                      id: tesla_max_soce
+                                      min_value: 0
+                                      max_value: 100
+                                      on_value:
+                                        - lvgl.bar.update:
+                                            id: 
+                                              - battbar_1t
+                                              - battbar_2t
+                                              - battbar_3t
+                                              - battbar_4t
+                                              - battbar_5t
+                                              - battbar_6t
+                                              - battbar_7t
+                                              - battbar_8t
+                                            mode: RANGE
+                                            start_value: !lambda return x - 2;
+                                            value: !lambda return x;
+                                        - lvgl.label.update:
+                                            id: lvgl_label_tesla_charge_state
+                                            text: !lambda |-
+                                              char buf[40];
+                                              int curr = (int) id(tesla_charge_statee).state;
+                                              int maxs = (int) id(tesla_max_soce).state;
+                                              if (curr >= maxs) {
+                                                snprintf(buf, sizeof(buf), "%d%%", curr);
+                                              } else {
+                                                snprintf(buf, sizeof(buf), "%d\u203A%d%%", curr, maxs);
+                                              }
+                                              return {buf};
+
+
+                - name: "\u067D"
+                  id: tab_homeass
+                  scrollable: false
+                  #pad_all: 0
+                  widgets:
+                    - label:
+                        text: "Garázs"
+                        text_font: font_nagy
+                    - obj:
+                        x: 290
+                        y: 35
+                        width: 85
+                        height: 265
+                        scrollable: false
+                        pad_all: 6
+                        widgets:
+                          - label:
+                              text: "Garázsajtó"
+                              text_font: font_kis
+                              align: TOP_MID
+                          - button:
+                              id: but_cov_up_garazs
+                              y: 30
+                              width: 70
+                              height: 68
+                              widgets:
+                                - label:
+                                    id: cov_up_garazs
+                                    align: center
+                                    text_color: 0xFFFFFF
+                                    text_font: ikonok_nagy
+                                    text: "\uE05D" #UP
+                              on_press:
+                                then:
+                                  - sensor.template.publish:
+                                      id: cov_command
+                                      state: 123.100
+
+                          - button:
+                              id: but_cov_stop_garazs
+                              y: 105
+                              width: 70
+                              height: 68
+                              widgets:
+                                - label:
+                                    id: cov_stop_garazs
+                                    align: center
+                                    text_color: 0xFFFFFF
+                                    text_font: ikonok_nagy
+                                    text: "\uE4DB" #STOP
+                              on_press:
+                                then:
+                                  - sensor.template.publish:
+                                      id: cov_command
+                                      state: 123.200
+                          - button:
+                              id: but_cov_down_garazs
+                              y: 180
+                              width: 70
+                              height: 68
+                              widgets:
+                                - label:
+                                    id: cov_down_garazs
+                                    align: center
+                                    text_color: 0xFFFFFF
+                                    text_font: ikonok_nagy
+                                    text: "\uE045" #DOWN
+                              on_press:
+                                then:
+                                  - sensor.template.publish:
+                                      id: cov_command
+                                      state: 123.000
+                    - obj:
+                        x: 10
+                        y: 35
+                        width: 260
+                        height: 265
+                        scrollable: false
+                        pad_all: 6
+                        widgets:
+                          - label:
+                              text: "Világítás"
+                              text_font: font_kis
+                              align: TOP_MID
+                          - button:
+                              x: 10
+                              y: 30
+                              width: 105
+                              height: 80
+                              checkable: true
+                              state:
+                                disabled: true
+                              id: btn_lampa_garazs
+                              widgets:
+                                - label:
+                                    text: "\u067C"
+                                    text_font: ikonok_nagy
+                                    align: CENTER
+                                    y: -12
+                                - label:
+                                    text: "Garázs"
+                                    align: CENTER
+                                    y: 15
+                              on_click:
+                                - homeassistant.service:
+                                    service: light.toggle
+                                    data: 
+                                      entity_id: light.garazs_vezerles_garazs
+                          - button:
+                              x: 125
+                              y: 30
+                              width: 105
+                              height: 80
+                              checkable: true
+                              id: btn_lampa_hazszam
+                              widgets:
+                                - label:
+                                    text: "\U000F04DD"
+                                    text_font: ikonok_nagy
+                                    align: CENTER
+                                    y: -12
+                                - label:
+                                    text: "Házszám"
+                                    align: CENTER
+                                    y: 15
+                              on_click:
+                                - homeassistant.service:
+                                    service: light.toggle
+                                    data: 
+                                      entity_id: light.garazs_vezerles_hazszam
+
+                          - button:
+                              x: 10
+                              y: 120
+                              width: 105
+                              height: 80
+                              checkable: true
+                              state:
+                                disabled: true
+                              id: btn_lampa_kert
+                              widgets:
+                                - label:
+                                    text: "\u065D"
+                                    text_font: icons_28_konyha_light
+                                    align: CENTER
+                                    x: -22
+                                - label:
+                                    text: "Kert"
+                                    align: CENTER
+                                    x: 15
+                              on_click:
+                                - homeassistant.service:
+                                    service: light.toggle
+                                    data: 
+                                      entity_id: light.kert
+
+                          - button:
+                              x: 125
+                              y: 120
+                              width: 105
+                              height: 80
+                              checkable: true
+                              state:
+                                disabled: true
+                              id: btn_lampa_szaletli
+                              widgets:
+                                - label:
+                                    text: "\U000F0876"
+                                    text_font: icons_28_konyha_light
+                                    align: CENTER
+                                    x: 30
+                                - label:
+                                    text: "Szaletli"
+                                    align: CENTER
+                                    x: -13
+                              on_click:
+                                - homeassistant.service:
+                                    service: light.toggle
+                                    data: 
+                                      entity_id: light.szaletli
+

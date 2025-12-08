@@ -1,0 +1,299 @@
+substitutions:
+  cover_garazs_entity: cover.garazs_vezerles_garazsajto
+
+
+udp:
+  - id: udp_tesla_receiver
+  - id: udp_cover_sender
+    port:
+      listen_port: 18510 #dummy, not receiving anyithing on this
+      broadcast_port: 18511
+    addresses:
+      - 172.22.215.55 # garazs-vezerles
+
+packet_transport:
+  - id: udp_tesla_sensors
+    platform: udp
+    udp_id: udp_tesla_receiver
+    update_interval: never
+    providers:
+      - name: garazs-vezerles
+        encryption: !secret udp_encryption_kapcsolok
+  - id: udp_cover_commands
+    platform: udp
+    udp_id: udp_cover_sender
+    update_interval: never
+    encryption: !secret udp_encryption_kapcsolok
+    sensors:
+      - cov_command
+
+sensor:
+  - platform: packet_transport
+    id: tesla_battery_range
+    provider: garazs-vezerles
+    transport_id: udp_tesla_sensors
+    remote_id: battery_range
+    on_value:
+      - if:
+          condition: 
+            lambda: return isnan(x);
+          then:
+            - lvgl.widget.hide: lvgl_label_tesla_battery_range
+          else:
+            - lvgl.label.update:
+                id: lvgl_label_tesla_battery_range
+                text:
+                  format: "%.0f km"
+                  args: [ 'x' ]
+            - lvgl.widget.show: lvgl_label_tesla_battery_range
+
+  - platform: packet_transport
+    id: tesla_mins_to_limit
+    provider: garazs-vezerles
+    transport_id: udp_tesla_sensors
+    remote_id: mins_to_limit
+    on_value:
+      - if:
+          condition: 
+            lambda: return (isnan(x) or x == 0);
+          then:
+            - lvgl.widget.hide: lvgl_label_tesla_mins_to_limit
+          else:
+            - lvgl.label.update:
+                id: lvgl_label_tesla_mins_to_limit
+                text:
+                  format: "%.0f perc"
+                  args: [ 'x' ]
+            - lvgl.widget.show: lvgl_label_tesla_mins_to_limit
+
+  - platform: packet_transport
+    id: tesla_max_soc
+    provider: garazs-vezerles
+    transport_id: udp_tesla_sensors
+    remote_id: max_soc
+    on_value:
+      - if:
+          condition: 
+            lambda: return isnan(x);
+          then:
+            - lvgl.widget.hide:
+                - battbar_1t
+                - battbar_2t
+                - battbar_3t
+                - battbar_4t
+                - battbar_5t
+                - battbar_6t
+                - battbar_7t
+                - battbar_8t
+          else:
+            - lvgl.bar.update:
+                id: 
+                  - battbar_1t
+                  - battbar_2t
+                  - battbar_3t
+                  - battbar_4t
+                  - battbar_5t
+                  - battbar_6t
+                  - battbar_7t
+                  - battbar_8t
+                mode: RANGE
+                start_value: !lambda return x - 2;
+                value: !lambda return x;
+            - lvgl.widget.show:
+                - battbar_1t
+                - battbar_2t
+                - battbar_3t
+                - battbar_4t
+                - battbar_5t
+                - battbar_6t
+                - battbar_7t
+                - battbar_8t
+
+  - platform: packet_transport
+    id: tesla_charge_state
+    provider: garazs-vezerles
+    transport_id: udp_tesla_sensors
+    remote_id: charge_state
+    on_value:
+      - if:
+          condition: 
+            lambda: return isnan(x);
+          then:
+            - lvgl.widget.hide:
+                - battbar_1
+                - battbar_2
+                - battbar_3
+                - battbar_4
+                - battbar_5
+                - battbar_6
+                - battbar_7
+                - battbar_8
+                - lvgl_label_tesla_charge_state
+            - lvgl.label.update:
+                id: lvgl_label_tesla_charge_state
+                text: "-- %"
+          else:
+            - lvgl.bar.update:
+                id: 
+                  - battbar_1
+                  - battbar_2
+                  - battbar_3
+                  - battbar_4
+                  - battbar_5
+                  - battbar_6
+                  - battbar_7
+                  - battbar_8
+                value: !lambda return x;
+            - lvgl.widget.show:
+                - battbar_1
+                - battbar_2
+                - battbar_3
+                - battbar_4
+                - battbar_5
+                - battbar_6
+                - battbar_7
+                - battbar_8
+                - lvgl_label_tesla_charge_state
+            - lvgl.label.update:
+                id: lvgl_label_tesla_charge_state
+                text: !lambda |-
+                    char buf[40];
+                    int curr = (int) x;
+                    int maxs = (int) id(tesla_max_soc).state;
+                    if (curr >= maxs) {
+                      snprintf(buf, sizeof(buf), "%d%%", curr);
+                    } else {
+                      if (id(evse_state).state == "C2" || id(evse_state).state == "D2") {
+                        snprintf(buf, sizeof(buf), "%d›%d%%", curr, maxs);
+                      } else {
+                        snprintf(buf, sizeof(buf), "%d%%", curr);
+                      }
+                    }
+                    return {buf};
+
+  - platform: template
+    id: cov_command
+    filters:
+      - throttle: 350ms
+    on_value:
+      - lambda: |-
+            ESP_LOGI("sensor_to_udp", "cov_command: %.3f", x);
+
+  - platform: homeassistant
+    id: cover_garazs_pos
+    entity_id: ${cover_garazs_entity}
+    attribute: current_position
+    on_value:
+      - if:
+          condition:
+            lambda: |-
+              return x == 100;
+          then:
+            - lvgl.widget.update:
+                id: cov_up_garazs
+                text_color: 0xadadad
+          else:
+            - lvgl.widget.update:
+                id: cov_up_garazs
+                text_color: 0xFFFFFF
+      - if:
+          condition:
+            lambda: |-
+              return x == 0;
+          then:
+            - lvgl.widget.update:
+                id: cov_down_garazs
+                text_color: 0xadadad
+          else:
+            - lvgl.widget.update:
+                id: cov_down_garazs
+                text_color: 0xFFFFFF
+
+text_sensor:
+  - platform: homeassistant
+    id: ts_light_garazs
+    entity_id: light.garazs_vezerles_garazs
+    on_value:
+      then:
+        - lvgl.widget.update:
+            id: btn_lampa_garazs
+            state:
+              checked: !lambda return (0 == x.compare(std::string{"on"}));
+              disabled: !lambda return ((0 == x.compare(std::string{"unavailable"})) or (0 == x.compare(std::string{"unknown"})));
+
+  - platform: homeassistant
+    id: ts_light_hazszam
+    entity_id: light.garazs_vezerles_hazszam
+    on_value:
+      then:
+        - lvgl.widget.update:
+            id: btn_lampa_hazszam
+            state:
+              checked: !lambda return (0 == x.compare(std::string{"on"}));
+              disabled: !lambda return ((0 == x.compare(std::string{"unavailable"})) or (0 == x.compare(std::string{"unknown"})));
+
+  - platform: homeassistant
+    id: ts_light_kert
+    entity_id: light.kert
+    on_value:
+      then:
+        - lvgl.widget.update:
+            id: btn_lampa_kert
+            state:
+              checked: !lambda return (0 == x.compare(std::string{"on"}));
+              disabled: !lambda return ((0 == x.compare(std::string{"unavailable"})) or (0 == x.compare(std::string{"unknown"})));
+
+  - platform: homeassistant
+    id: ts_light_szaletli
+    entity_id: light.szaletli
+    on_value:
+      then:
+        - lvgl.widget.update:
+            id: btn_lampa_szaletli
+            state:
+              checked: !lambda return (0 == x.compare(std::string{"on"}));
+              disabled: !lambda return ((0 == x.compare(std::string{"unavailable"})) or (0 == x.compare(std::string{"unknown"})));
+
+
+  - platform: homeassistant
+    id: cover_garazs_state
+    entity_id: ${cover_garazs_entity} #cover.garazs_vezerles_garazsajto
+    on_value:
+      - lvgl.widget.update:
+          id: but_cov_up_garazs
+          state:
+            disabled: !lambda return ((0 == x.compare(std::string{"unavailable"})) or (0 == x.compare(std::string{"unknown"})));
+      - lvgl.widget.update:
+          id: but_cov_stop_garazs
+          state:
+            disabled: !lambda return ((0 == x.compare(std::string{"unavailable"})) or (0 == x.compare(std::string{"unknown"})));
+      - lvgl.widget.update:
+          id: but_cov_down_garazs
+          state:
+            disabled: !lambda return ((0 == x.compare(std::string{"unavailable"})) or (0 == x.compare(std::string{"unknown"})));
+      - if:
+          condition:
+            lambda: |-
+              return ((0 == x.compare(std::string{"opening"})) or (0 == x.compare(std::string{"closing"})) or (0 == x.compare(std::string{"unavailable"})) or (0 == x.compare(std::string{"unknown"})));
+          then:
+            - lvgl.label.update:
+                id: cov_stop_garazs
+                text: "\uE4DB" #STOP
+          else:
+            - lvgl.label.update:
+                id: cov_stop_garazs
+                text: !lambda |-
+                  static char buf[5];
+                  std::string icon; // = "\u0674"; //cover 0
+                  float pos = id(cover_garazs_pos).state;
+                  if (pos == 100.0) {
+                      icon = "\u0676"; //cover 100
+                  } else if (pos > 50) {
+                      icon = "\u0677"; //cover 66
+                  } else if (pos > 0) {
+                      icon = "\u0678"; //cover 33
+                  } else {
+                      icon = "\u0679"; //cover 0
+                  }
+                  snprintf(buf, sizeof(buf), "%s", icon.c_str());
+                  return buf;

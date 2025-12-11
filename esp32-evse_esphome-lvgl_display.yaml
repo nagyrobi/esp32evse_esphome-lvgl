@@ -483,7 +483,7 @@ text_sensor:
         - lvgl.label.update:
             id: lvgl_label_info_statusmsg
             text: !lambda |-
-              return x + " (" + id(j1772_state_map)[x] + ")";
+              return (x + " (" + id(j1772_state_map)[x] + ")").c_str();
         - if:
             condition:
               lambda: |-

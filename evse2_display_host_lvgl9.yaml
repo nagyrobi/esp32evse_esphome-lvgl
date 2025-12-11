@@ -582,7 +582,7 @@ text_sensor:
         - lvgl.label.update:
             id: lvgl_label_info_statusmsg
             text: !lambda |-
-              return x + " (" + id(j1772_state_map)[x] + ")";
+              return (x + " (" + id(j1772_state_map)[x] + ")").c_str();
         - if:
             condition:
               lambda: |-
@@ -2785,18 +2785,15 @@ lvgl:
                                             id: lvgl_label_tesla_charge_state
                                             text: !lambda |-
                                               char buf[40];
-                                              int curr = (int) id(tesla_charge_statee).state;
-                                              int maxs = (int) id(tesla_max_soce).state;
+                                              int curr = (int) x;
+                                              int maxs = (int) lv_slider_get_value(id(tesla_max_soce));
                                               if (curr >= maxs) {
                                                 snprintf(buf, sizeof(buf), "%d%%", curr);
                                               } else {
                                                 snprintf(buf, sizeof(buf), "%d\u203A%d%%", curr, maxs);
                                               }
                                               return {buf};
- 
-
-
-                                  - slider:
+                                   - slider:
                                       align: BOTTOM_RIGHT
                                       width: 50%
                                       id: tesla_max_soce
@@ -2820,8 +2817,8 @@ lvgl:
                                             id: lvgl_label_tesla_charge_state
                                             text: !lambda |-
                                               char buf[40];
-                                              int curr = (int) id(tesla_charge_statee).state;
-                                              int maxs = (int) id(tesla_max_soce).state;
+                                              int curr = (int) lv_slider_get_value(id(tesla_charge_statee));
+                                              int maxs = (int) x;
                                               if (curr >= maxs) {
                                                 snprintf(buf, sizeof(buf), "%d%%", curr);
                                               } else {

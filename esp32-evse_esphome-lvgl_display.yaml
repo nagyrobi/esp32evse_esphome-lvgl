@@ -1317,6 +1317,7 @@ lvgl:
                               - name: "EVSE"
                                 text_align: CENTER
                                 scrollable: FALSE
+                                pad_bottom: 0
                                 widgets:
                                     - label:
                                         text: "EVSE Settings"

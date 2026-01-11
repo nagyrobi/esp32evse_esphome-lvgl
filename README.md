@@ -36,7 +36,7 @@ The display communicates with ESP32-EVSE (min. version 2.0.1) via UART at 115200
 Enter your ESP32-EVSE web UI and in _Settings_ > _Serial_, select for the UART port _Mode_: _AT Commands_. _Baud rate_: _115200_,  _Data bits_: _8_,  _Stop bits_: _1_, _Parity_: _Disable_. 
 Press Submit and reboot the evse from  _System_ > _Restart_.
 
-If you use the [esp32s2-evse-d-a board](https://github.com/dzurikmiroslav/esp32-evse/wiki/ESP32-S2-DA) you can use a 4-pin cable with 2.5mm JST wired correctly for RX/TX/GND/5V:
+If you use the [esp32s2-evse-d-a board](https://github.com/dzurikmiroslav/esp32-evse/wiki/ESP32%E2%80%90S2-EVSE-DIY-ALPHA) you can use a 4-pin cable with 2.5mm JST wired correctly for RX/TX/GND/5V:
 
 | ESP32-EVSE U6 UART (1 leftmost looking from top, 2.5mm JST) | Guition JC3248w535 P1 (1 closest to USB-C, 1.25mm JST) | WT32-SC01 Plus I/O (leftmost under R11) |
 | -------- | ------- | ------- |

@@ -1,0 +1,614 @@
+substitutions:
+  device_name: evse2-display-ledstrip
+  device_description: "ESP32-EVSE + ESPHome in TWC Gen2"
+  friendly_name: "LED Strip"
+  friendly_name_evse: "EVSE"
+  friendly_name_ev: "Tesla"
+  area_name: "Garage"
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/nagyrobi/esp32evse-esphome
+    refresh: 1days
+    components: [ esp32evse ]
+
+esphome:
+  name: ${device_name}
+  area: "${area_name}"
+  comment: ${device_description}
+  project:
+    name: esphome,robi.${device_name}
+    version: ${device_description}
+  on_boot:
+    - priority: 600
+      then:
+        - light.turn_on:
+            id: light_twc2_brightness
+            brightness: 50%
+        - light.turn_on:
+            id: light_twc2
+            effect: 'none'
+    - priority: -300
+      then:
+        - delay: 2s
+        - script.execute: init_evse_comms
+        - delay: 3s
+        - script.execute: eval_state
+
+esp32:
+  variant: ESP32C3
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  reboot_timeout: 30min
+  enable_btm: true
+  enable_rrm: true
+
+logger:
+  baud_rate: 0
+  level: INFO
+
+debug:
+  update_interval: 60s
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+api:
+  reboot_timeout: 60min
+  encryption:
+    key: !secret encryption_key
+
+light:
+  - platform: status_led
+    id: statusled
+    pin:
+      number: GPIO8
+      inverted: true
+      ignore_strapping_warning: true
+
+  - platform: esp32_rmt_led_strip
+    internal: true # do not expose this light directly to HA !
+    id: light_twc2
+    rgb_order: GRB
+    pin: GPIO4
+    use_psram: false
+    default_transition_length: 100ms
+    num_leds: 8
+    rmt_symbols: 48
+    chipset: WS2812
+    effects:
+      - addressable_lambda:
+          name: "A"
+          update_interval: 1s   # any value; it’s essentially static
+          lambda: |-
+            const bool reverse = false;
+            const int n = (int) it.size();
+            if (n <= 0) return;
+
+            it.all() = Color::BLACK;
+
+            const int idx = reverse ? (n - 1) : 0;
+            it[idx] = Color(0, 255, 0); // green (RGB) instead of current_color;
+      - addressable_lambda:
+          name: "B1"
+          update_interval: 50ms
+          lambda: |-
+            const bool reverse = false;
+            const int n = (int) it.size();
+            if (n <= 0) return;
+
+            // In forward: first steady, last blinks
+            // In reverse: last steady, first blinks
+            const int steady_idx = reverse ? (n - 1) : 0;
+            const int blink_idx  = reverse ? 0 : (n - 1);
+
+            // Blink: toggle every 500ms (500ms on, 500ms off)
+            const bool blink_on = ((millis() / 500) % 2) == 0;
+
+            it.all() = Color::BLACK;
+
+            // Steady end always on
+            it[steady_idx] = Color(0, 255, 0); // green (RGB) instead of current_color;
+
+            // Other end blinks (avoid double-writing if n == 1)
+            if (blink_idx != steady_idx && blink_on) {
+              it[blink_idx] = Color(0, 0, 255); // blue (RGB) instead of current_color;
+            }
+      - addressable_lambda:
+          name: "B2"
+          update_interval: 1s
+          lambda: |-
+            const int n = (int) it.size();
+            if (n <= 0) return;
+
+            it.all() = Color::BLACK;
+
+            it[0] = Color(0, 255, 0); // green (RGB) instead of current_color;
+            if (n > 1) it[n - 1] = Color(0, 255, 0); // green (RGB) instead of current_color;
+      - addressable_lambda:
+          name: "C1"
+          update_interval: 500ms
+          lambda: |-
+            const bool reverse = false;
+            const int n = (int) it.size();
+            if (n <= 0) return;
+
+            const int dir = reverse ? -1 : 1;
+
+            // Put the runner "head" in the middle (lower-middle for even n)
+            const int pos = n / 2;
+
+            it.all() = Color::BLACK;
+
+            const Color head = Color(0, 255, 0); // green (RGB) instead of current_color;
+            const Color t1   = head * 175;  // ~66%
+            const Color t2   = head * 90;   // ~33%
+
+            it[pos] = head;
+            if (n >= 2) it[(pos - dir + n) % n] = t1;
+            if (n >= 3) it[(pos - 2 * dir + n) % n] = t2;
+      - addressable_lambda:
+          name: "C2"
+          update_interval: 16ms   # fixed value, fast “tick”, speed from evse_current_l1
+          lambda: |-
+            const bool reverse = false;
+            static int pos = 0;
+            static int last_dir = 0;
+            static uint32_t last_step_ms = 0;
+
+            const int n = (int) it.size();
+            if (n <= 0) return;
+
+            const int dir = reverse ? -1 : 1;
+
+            // (Re)initialize on effect start or direction change
+            if (initial_run || dir != last_dir) {
+              pos = reverse ? (n - 1) : 0;
+              last_dir = dir;
+              last_step_ms = millis();
+            }
+
+            // Animation speed control based on measured charging current (0A -> 150ms, 32A -> 50ms)
+            float a = id(evse_current_l1).state;
+            if (isnan(a)) a = 0;
+            if (a < 0) a = 0;
+            if (a > 32) a = 32;
+
+            uint32_t step_ms = (uint32_t) lroundf(150.0f - (a * (100.0f / 32.0f)));
+
+            // safety clamp (optional)
+            if (step_ms < 50) step_ms = 50;
+            if (step_ms > 150) step_ms = 150;
+
+            const uint32_t now = millis();
+            if ((uint32_t)(now - last_step_ms) >= step_ms) {
+              last_step_ms = now;
+              pos = (pos + dir + n) % n;
+            }
+
+            // Render current frame (head + 2-pixel trail)
+            it.all() = Color::BLACK;
+
+            const Color head = Color(0, 255, 0); // green (RGB) instead of current_color;
+            const Color t1   = head * 175;  // ~66% (170/255)
+            const Color t2   = head * 90;   // ~33% (85/255)
+
+            it[pos] = head;
+            if (n >= 2) it[(pos - dir + n) % n] = t1;
+            if (n >= 3) it[(pos - 2 * dir + n) % n] = t2;
+      - addressable_lambda:
+          name: "E"
+          update_interval: 50ms
+          lambda: |-
+            const int n = (int) it.size();
+            if (n <= 0) return;
+
+            const int mid = (n - 1) / 2;  // lower-middle when n is even
+
+            const uint32_t now = millis();
+            const uint32_t cycle = 1500;   // 500 on + 1000 off
+            const uint32_t t = now % cycle;
+
+            it.all() = Color::BLACK;
+
+            if (t < 500) {
+              it[mid] = Color(255, 0, 0); // red (RGB) instead of current_color;
+            }
+      - addressable_lambda:
+          name: "F"
+          update_interval: 1s
+          lambda: |-
+            const int n = (int) it.size();
+            if (n <= 0) return;
+
+            const int mid = (n - 1) / 2;  // lower-middle when n is even
+
+            it.all() = Color::BLACK;
+            it[mid] = Color(255, 165, 0); // orange (RGB) instead of current_color;
+
+  - platform: monochromatic # a virtual light to control brightness only without interfering with effects from HA side
+    name: ${friendly_name} Fényerő
+    id: light_twc2_brightness
+    output: light_twc2_brightfloat
+    entity_category: config
+    gamma_correct: 0
+    default_transition_length: 0s
+
+output:
+  - platform: template
+    id: light_twc2_brightfloat
+    type: float
+    min_power: 0.15
+    zero_means_zero: True
+    write_action:
+      - light.turn_on:
+          id: light_twc2
+          brightness: !lambda return state;
+      - lambda: |-
+          id(brightfloat) = state;
+globals:
+  - id: brightfloat
+    type: float
+
+number:
+  - platform: esp32evse
+    esp32evse_id: evse
+    charging_current:
+      name: ${friendly_name_evse} Max charge current
+      id: evse_charge_current
+
+button:
+  - platform: restart
+    name: ${friendly_name} reboot
+    entity_category: diagnostic
+    id: twc2_leds_restart
+  - platform: factory_reset
+    name: ${friendly_name} factory reset
+    entity_category: diagnostic
+  - platform: esp32evse
+    esp32evse_id: evse
+    restart:
+      name: ${friendly_name_evse} reboot
+      id: evse_restart
+    authorize:
+      name: ${friendly_name_evse} authorize charging
+      id: evse_auhorize_charging
+    start_ap:
+      name: ${friendly_name_evse} start AP
+      id: evse_start_ap
+  - platform: template
+    name: ${friendly_name_ev} open charge flap
+    id: ev_openflap_rf
+    on_press:
+      - remote_transmitter.transmit_raw:
+          code: [400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -1200, 400, -400, 400, -400, 800, -800, 400, -400, 800, -800, 800, -800, 400, -400, 800, -800, 800, -800, 800, -800, 800, -800, 800, -800, 400, -400, 800, -400, 400, -800, 800, -400, 400, -800, 400, -400, 800, -400, 400, -400, 400, -800, 400, -400, 400, -400, 800, -400, 400, -800, 800, -400, 400, -800, 800, -800, 400, -400, 400, -400, 400, -400, 800, -400, 400, -800, 400, -400, 800]
+          repeat:
+            times: 10
+            wait_time: 25ms
+
+remote_transmitter:
+  pin: GPIO3
+  carrier_duty_percent: 100%
+  non_blocking: true
+  rmt_symbols: 48
+
+uart:
+  - id: evse_uart
+    tx_pin: GPIO21
+    rx_pin: GPIO20
+    baud_rate: 115200
+    stop_bits: 1
+    parity: NONE
+
+esp32evse:
+  id: evse
+  uart_id: evse_uart
+  on_ready:
+    - script.execute: init_evse_comms
+
+script:
+  - id: init_evse_comms
+    then:
+      - esp32evse.unsubscribe_all:
+      - esp32evse.force_update:
+      - delay: 1s
+      - esp32evse.state.subscribe: 500ms
+      - esp32evse.enable.subscribe: 1s
+      - esp32evse.error.subscribe: 2s
+      - esp32evse.emeter_power.subscribe: 5s
+      - esp32evse.emeter_session_time.subscribe: 10s
+      - esp32evse.emeter_charging_time.subscribe: 10s
+      - esp32evse.energy_consumption.subscribe: 30s
+      - esp32evse.current.subscribe: 5s
+      - delay: 1s
+  - id: eval_state
+    then:
+      - if:
+          condition:
+            - binary_sensor.is_on: timeout_fault
+          then:
+            - light.turn_on:
+                id: light_twc2
+                effect: 'none'
+          else:
+            - if:
+                condition:
+                  text_sensor.state:
+                    id: evse_state
+                    state: 'A'
+                then:
+                  - light.turn_on:
+                      id: light_twc2
+                      effect: 'A'
+            - if:
+                condition:
+                  text_sensor.state:
+                    id: evse_state
+                    state: 'B1'
+                then:
+                  - light.turn_on:
+                      id: light_twc2
+                      effect: 'B1'
+            - if:
+                condition:
+                  text_sensor.state:
+                    id: evse_state
+                    state: 'B2'
+                then:
+                  - light.turn_on:
+                      id: light_twc2
+                      effect: 'B2'
+            - if:
+                condition:
+                  or:
+                    - text_sensor.state:
+                        id: evse_state
+                        state: 'C1'
+                    - text_sensor.state:
+                        id: evse_state
+                        state: 'D1'
+                then:
+                  - light.turn_on:
+                      id: light_twc2
+                      effect: 'C1'
+            - if:
+                condition:
+                  or:
+                    - text_sensor.state:
+                        id: evse_state
+                        state: 'C2'
+                    - text_sensor.state:
+                        id: evse_state
+                        state: 'D2'
+                then:
+                  - light.turn_on:
+                      id: light_twc2
+                      effect: 'C2'
+            - if:
+                condition:
+                  text_sensor.state:
+                    id: evse_state
+                    state: 'E'
+                then:
+                  - light.turn_on:
+                      id: light_twc2
+                      effect: 'E'
+            - if:
+                condition:
+                  text_sensor.state:
+                    id: evse_state
+                    state: 'F'
+                then:
+                  - light.turn_on:
+                      id: light_twc2
+                      effect: 'F'
+      - light.turn_on:
+          id: light_twc2
+          brightness: !lambda return id(brightfloat);
+
+sensor:
+  - platform: esp32evse
+    esp32evse_id: evse
+    temperature:
+      name: ${friendly_name_evse} Temperature
+    emeter_power:
+      name: ${friendly_name_evse} Power
+      id: evse_power
+    current_l1:
+      id: evse_current_l1
+      internal: true
+    emeter_session_time:
+      name: ${friendly_name_evse} Session time
+      id: evse_session_time
+    emeter_charging_time:
+      name: ${friendly_name_evse} Charging time
+      id: evse_charging_time
+    heap_used:
+      name: ${friendly_name_evse} Heap used
+    heap_total:
+      name: ${friendly_name_evse} Heap total
+    energy_consumption:
+      name: ${friendly_name_evse} Consumed energy
+      id: evse_session_consumption
+    total_energy_consumption:
+      name: ${friendly_name_evse} Consumed total energy
+      id: evse_total_consumption
+    wifi_rssi:
+      name: ${friendly_name_evse} WiFi signal
+    uptime:
+      name: ${friendly_name_evse} uptime
+  - platform: uptime
+    name: ${friendly_name} uptime
+
+  - platform: wifi_signal 
+    name: ${friendly_name} WiFi signal
+    entity_category: "diagnostic"
+  - platform: debug
+    free:
+      name: ${friendly_name} Heap Free
+    block:
+      name: ${friendly_name} Heap Max Block
+    loop_time:
+      name: ${friendly_name} Loop Time
+
+binary_sensor:
+  - platform: esp32evse
+    esp32evse_id: evse
+    pending_authorization:
+      name: ${friendly_name_evse} Pendig authorization
+      trigger_on_initial_state: true
+    wifi_connected:
+      name: ${friendly_name_evse} WiFi connected
+    charging_limit_reached:
+      name: ${friendly_name_evse} Limit reached
+    pilot_fault:
+      name: ${friendly_name_evse} Fault CP
+    diode_short_fault:
+      name: ${friendly_name_evse} Fault Diode short
+    rcm_triggered_fault:
+      name: ${friendly_name_evse} Fault RCM
+    rcm_self_test_fault:
+      name: ${friendly_name_evse} Fault RCM selftest
+    temperature_high_fault:
+      name: ${friendly_name_evse} Fault hi temp
+    temperature_sensor_fault:
+      name: ${friendly_name_evse} Fault temp sensor
+    timeout_fault:
+      name: ${friendly_name} Fault EVSE timeout
+      id: timeout_fault
+      on_state:
+        - script.execute: eval_state
+
+  - platform: status
+    id: api_connected_bs
+    name: ${friendly_name} API connected
+
+  - platform: gpio
+    pin:
+      number: GPIO1
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: ${friendly_name_evse} Plug button
+    icon: mdi:ev-plug-type2
+    filters:
+      - delayed_on: 200ms
+    on_press:
+      - light.turn_on:
+          id: light_twc2_brightness
+      - if:
+          any:
+            - text_sensor.state:
+                id: evse_state
+                state: 'A'
+            - text_sensor.state:
+                id: evse_state
+                state: 'B1'
+          then:
+            - button.press: ev_openflap_rf
+            - switch.turn_on: evse_enable_charge
+          else:
+            - switch.toggle: evse_enable_charge
+
+  - platform: gpio
+    pin:
+      number: GPIO10
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: ${friendly_name_evse} Reset button
+    icon: mdi:restart
+    filters:
+      - settle: 99ms
+    on_press:
+      - logger.log: "Pressed button, light on"
+      - light.turn_on:
+          id: light_twc2_brightness
+    on_click:
+      - logger.log: "Clicked button, available"
+      - switch.toggle: evse_available
+      - delay: 400ms
+      - if:
+          condition:
+            switch.is_on: evse_available
+          then:
+            - switch.turn_on: evse_enable_charge
+    on_double_click:
+      min_length: 100ms
+      max_length: 500ms
+      then:
+        - logger.log: "Double Clicked button start AP"
+        - button.press: evse_start_ap
+    on_multi_click:
+      - timing:
+          - ON for at least 3s
+        then:
+          - logger.log: "Long Clicked button, restart"
+          - light.turn_on:
+              id: light_twc2_brightness
+              brightness: 50%
+          - light.turn_on:
+              id: light_twc2
+              effect: 'none'
+          - button.press: evse_restart
+          - delay: 2s
+          - button.press: twc2_leds_restart
+
+text_sensor:
+  - platform: esp32evse
+    esp32evse_id: evse
+    state:
+      name: ${friendly_name_evse} State (J1772)
+      id: evse_state
+      on_value:
+        - script.execute: eval_state
+    device_name:
+      name: ${friendly_name_evse} device name
+    version:
+      name: ${friendly_name_evse} version
+    device_time:
+      name: ${friendly_name_evse} clock
+    wifi_sta_ssid:
+      name: ${friendly_name_evse} SSID
+    wifi_sta_ip:
+      name: ${friendly_name_evse} IP address
+    wifi_sta_mac:
+      name: ${friendly_name_evse} MAC address
+
+  - platform: wifi_info
+    ip_address:
+      name: ${friendly_name} IP address
+      id: txt_ip
+      icon: mdi:ip-network
+
+  - platform: version
+    name: ${friendly_name} version
+    entity_category: diagnostic
+    icon: mdi:tag
+    hide_timestamp: true
+    filters:
+      - lambda: |-
+          auto s = x;
+          size_t p = s.find(" (");
+          if (p != std::string::npos) s = s.substr(0, p);
+          return s;
+
+switch:
+  - platform: esp32evse
+    esp32evse_id: evse
+    enable:
+      name: ${friendly_name_evse} enable charging
+      id: evse_enable_charge
+    available:
+      name: ${friendly_name_evse} available
+      id: evse_available
+      disabled_by_default: true

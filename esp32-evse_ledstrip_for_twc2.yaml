@@ -41,7 +41,7 @@ esp32:
   variant: ESP32C3
   flash_size: 4MB
   framework:
-    type: esp-idf
+    type: arduino
 
 wifi:
   ssid: !secret wifi_ssid
@@ -74,16 +74,16 @@ light:
       inverted: true
       ignore_strapping_warning: true
 
-  - platform: esp32_rmt_led_strip
-    internal: true # do not expose this light directly to HA !
+  - platform: fastled_clockless
+    internal: true
+    # name: TWC2 # do not expose directly in HA !
     id: light_twc2
     rgb_order: GRB
     pin: GPIO4
-    use_psram: false
-    default_transition_length: 100ms
-    num_leds: 8
-    rmt_symbols: 48
+    default_transition_length: 0ms
+    num_leds: 19
     chipset: WS2812
+    color_correct: [60%, 60%, 60%]
     effects:
       - addressable_lambda:
           name: "A"
@@ -149,15 +149,18 @@ light:
             it.all() = Color::BLACK;
 
             const Color head = Color(0, 255, 0); // green (RGB) instead of current_color;
-            const Color t1   = head * 175;  // ~66%
-            const Color t2   = head * 90;   // ~33%
 
-            it[pos] = head;
-            if (n >= 2) it[(pos - dir + n) % n] = t1;
-            if (n >= 3) it[(pos - 2 * dir + n) % n] = t2;
+            // 5 LEDs total, head + 4 trailing pixels (scales are 0..255)
+            const uint8_t scale[5] = {255, 170, 120, 80, 40};  // tweak to taste
+
+            for (int k = 0; k < 5; k++) {
+              const int idx = (pos - (k * dir) + n) % n; // trail goes "behind" head for chosen direction
+              it[idx] = head * scale[k];
+            }
+
       - addressable_lambda:
           name: "C2"
-          update_interval: 16ms   # fixed value, fast “tick”, speed from evse_current_l1
+          update_interval: 32ms   # fixed value, fast “tick”, speed from evse_current_l1
           lambda: |-
             const bool reverse = false;
             static int pos = 0;
@@ -176,17 +179,17 @@ light:
               last_step_ms = millis();
             }
 
-            // Animation speed control based on measured charging current (0A -> 150ms, 32A -> 50ms)
+            // Animation speed control based on measured charging current (0A -> 100ms, 32A -> 32ms)
             float a = id(evse_current_l1).state;
             if (isnan(a)) a = 0;
             if (a < 0) a = 0;
             if (a > 32) a = 32;
 
-            uint32_t step_ms = (uint32_t) lroundf(150.0f - (a * (100.0f / 32.0f)));
+            uint32_t step_ms = (uint32_t) lroundf(100.0f - (a * (100.0f / 32.0f)));
 
             // safety clamp (optional)
-            if (step_ms < 50) step_ms = 50;
-            if (step_ms > 150) step_ms = 150;
+            if (step_ms < 32) step_ms = 32;
+            if (step_ms > 100) step_ms = 100;
 
             const uint32_t now = millis();
             if ((uint32_t)(now - last_step_ms) >= step_ms) {
@@ -197,13 +200,24 @@ light:
             // Render current frame (head + 2-pixel trail)
             it.all() = Color::BLACK;
 
-            const Color head = Color(0, 255, 0); // green (RGB) instead of current_color;
-            const Color t1   = head * 175;  // ~66% (170/255)
-            const Color t2   = head * 90;   // ~33% (85/255)
+            // const Color head = Color(0, 255, 0); // green (RGB) instead of current_color;
+            // const Color t1   = head * 175;  // ~66% (170/255)
+            // const Color t2   = head * 90;   // ~33% (85/255)
 
-            it[pos] = head;
-            if (n >= 2) it[(pos - dir + n) % n] = t1;
-            if (n >= 3) it[(pos - 2 * dir + n) % n] = t2;
+            // it[pos] = head;
+            // if (n >= 2) it[(pos - dir + n) % n] = t1;
+            // if (n >= 3) it[(pos - 2 * dir + n) % n] = t2;
+
+            const Color head = Color(0, 255, 0); // green (RGB) instead of current_color;
+
+            // 5 LEDs total, head + 4 trailing pixels (scales are 0..255)
+            const uint8_t scale[5] = {255, 170, 120, 80, 40};  // tweak to taste
+
+            for (int k = 0; k < 5; k++) {
+              const int idx = (pos - (k * dir) + n) % n; // trail goes "behind" head for chosen direction
+              it[idx] = head * scale[k];
+            }
+
       - addressable_lambda:
           name: "E"
           update_interval: 50ms
@@ -292,13 +306,15 @@ button:
           code: [400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -400, 400, -1200, 400, -400, 400, -400, 800, -800, 400, -400, 800, -800, 800, -800, 400, -400, 800, -800, 800, -800, 800, -800, 800, -800, 800, -800, 400, -400, 800, -400, 400, -800, 800, -400, 400, -800, 400, -400, 800, -400, 400, -400, 400, -800, 400, -400, 400, -400, 800, -400, 400, -800, 800, -400, 400, -800, 800, -800, 400, -400, 400, -400, 400, -400, 800, -400, 400, -800, 400, -400, 800]
           repeat:
             times: 10
-            wait_time: 25ms
+            wait_time: 5ms
 
 remote_transmitter:
-  pin: GPIO3
+  pin: 
+    number: GPIO3
+    mode:
+      output: true
   carrier_duty_percent: 100%
   non_blocking: true
-  rmt_symbols: 48
 
 uart:
   - id: evse_uart
@@ -592,16 +608,11 @@ text_sensor:
       icon: mdi:ip-network
 
   - platform: version
-    name: ${friendly_name} version
+    name: ${friendly_name} Verzió
     entity_category: diagnostic
     icon: mdi:tag
     hide_timestamp: true
-    filters:
-      - lambda: |-
-          auto s = x;
-          size_t p = s.find(" (");
-          if (p != std::string::npos) s = s.substr(0, p);
-          return s;
+    hide_hash: true
 
 switch:
   - platform: esp32evse

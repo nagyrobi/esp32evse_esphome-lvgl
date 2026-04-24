@@ -1,3 +1,12 @@
+# Use an ESP32 C3 Supermini to complement an ESP32-EVSE built-in a box refurbished
+# from a Tesla Wall Connector Gen2. They connect to each other via UART.
+# The LED strip is a piece of WS2812B containing 19 LEDs (from the 144 LEDs/m version)
+# mimmicks the animation of the original Wall Connector during charging, and shows
+# some extra patterns for the various supported states.
+# There's a push button on the Type II plug wired back to GPIO1, this is used to open
+# the chargeport flap while not connected, and to stop/resume charging while connected.
+# The reset button on the box is wired to GPIO10, providing similar functionality.
+
 substitutions:
   device_name: evse2-display-ledstrip
   device_description: "ESP32-EVSE + ESPHome in TWC Gen2"

@@ -249,7 +249,7 @@ light:
             it[mid] = Color(255, 165, 0); // orange (RGB) instead of current_color;
 
   - platform: monochromatic # a virtual light to control brightness only without interfering with effects from HA side
-    name: ${friendly_name} Fényerő
+    name: ${friendly_name} LED brightness
     id: light_twc2_brightness
     output: light_twc2_brightfloat
     entity_category: config

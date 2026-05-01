@@ -5,7 +5,7 @@ It relies on the [external ESPHome component](https://github.com/nagyrobi/esp32e
 
 ![Screen](images/esp32-evse_esphome-lvgl.gif)
 
-Example configuration is prepared for 3 types of screen hardware boards:
+Example configuration in `esp32-evse_esphome-lvgl_display.yaml` is prepared for 3 types of screen hardware boards:
 - Wireless-Tag/Panlee WT32-SC01 Plus
 - Guition 4848s040
 - Guition JC3248w535
@@ -44,6 +44,10 @@ If you use the [esp32s2-evse-d-a board](https://github.com/dzurikmiroslav/esp32-
 | 2: TX | 2: RX | 2: GND |
 | 3: RX | 3: TX | 3: TX |
 | 4: +5V | 4: +5V | 4: RX |
+
+## Alternative example, without display
+
+The configuartion shown in `esp32-evse_ledstrip_for_twc2.yaml` uses an ESP32 C3 SuperMini and a LED strip to mimick the behavior of a Tesla Wall Connector - motivation for this is that the esp32s2-evse-d-a board [can be retrofitted into the case of a Tesla Wall Connector Gen 2](https://github.com/dzurikmiroslav/esp32-evse/discussions/164). 
 
 ## Installation
 

@@ -1,5 +1,6 @@
 # Use an ESP32 C3 Supermini to complement an ESP32-EVSE built-in a box refurbished
 # from a Tesla Wall Connector Gen2. They connect to each other via UART.
+# See https://www.printables.com/model/1595135-tesla-wall-connector-gen2-box-repurposed-for-esp32
 # The LED strip is a piece of WS2812B containing 19 LEDs (from the 144 LEDs/m version)
 # mimmicks the animation of the original Wall Connector during charging, and shows
 # some extra patterns for the various supported states.

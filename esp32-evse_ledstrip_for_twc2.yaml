@@ -86,7 +86,7 @@ light:
 
   - platform: fastled_clockless
     internal: true
-    # name: TWC2 # do not expose directly in HA !
+    # name: TWC2 # let's not expose this light directly to HA, to avoid messing with effects from there
     id: light_twc2
     rgb_order: GRB
     pin: GPIO4
@@ -258,7 +258,7 @@ light:
             it.all() = Color::BLACK;
             it[mid] = Color(255, 165, 0); // orange (RGB) instead of current_color;
 
-  - platform: monochromatic # a virtual light to control brightness only without interfering with effects from HA side
+  - platform: monochromatic # a virtual light to control brightness only from HA side
     name: ${friendly_name} LED brightness
     id: light_twc2_brightness
     output: light_twc2_brightfloat

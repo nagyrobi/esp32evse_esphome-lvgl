@@ -30,7 +30,7 @@ What makes these a good choice is:
 
 Any other ESPHome supported graphical display could be used, the config file needs to be adjusted accordingly. If the resolution differs, placement of the widgets, font sizes may need correction too.
 
-## Preparation
+### Preparation
 
 The display communicates with ESP32-EVSE (min. version 2.0.1) via UART at 115200 baud rate. 
 Enter your ESP32-EVSE web UI and in _Settings_ > _Serial_, select for the UART port _Mode_: _AT Commands_. _Baud rate_: _115200_,  _Data bits_: _8_,  _Stop bits_: _1_, _Parity_: _Disable_. 
@@ -49,7 +49,7 @@ If you use the [esp32s2-evse-d-a board](https://github.com/dzurikmiroslav/esp32-
 
 The configuartion shown in `esp32-evse_ledstrip_for_twc2.yaml` uses an ESP32 C3 SuperMini and a LED strip to mimick the behavior of a Tesla Wall Connector - motivation for this is that the esp32s2-evse-d-a board [can be retrofitted into the case of a Tesla Wall Connector Gen 2](https://github.com/dzurikmiroslav/esp32-evse/discussions/164). 
 
-## Installation
+### Installation
 
 If you're not familiar yet with ESPHome, check out their [Getting Started guide](https://esphome.io/guides/getting_started_hassio). You need at least version 2025.11.2. I recommend to use their Dashboard.
 Place the ready-made _esp32-evse_esphome-lvgl_display.yaml_ configuration file and the _pak_ folder with all its contents from this repo in ESPHome's config directory. In the ``packages:`` section make sure you only have uncommented the line corresponding to your display. Create your own `secrets.yaml` file in the same directory with your own data:

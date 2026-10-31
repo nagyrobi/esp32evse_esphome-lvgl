@@ -57,19 +57,20 @@ display:
     id: my_display
     model: WT32-SC01-PLUS
     data_rate: 10MHz
-    rotation: 90
     dc_pin:
       number: 0
       ignore_strapping_warning: true
+
+# With LVGL, rotation must be set here instead of in display:, and LVGL rotates
+# the touch input as well, so the touchscreen needs no transform for it.
+lvgl:
+  rotation: 90
 
 touchscreen:
   - platform: ft63x6
     id: my_touch
     interrupt_pin: 7
-    transform:
-      swap_xy: true
-      mirror_y: true
-      
+
 uart:
   - id: evse_uart
     tx_pin: 11

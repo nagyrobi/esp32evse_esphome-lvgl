@@ -56,7 +56,6 @@ display:
     dimensions:
       width: 480
       height: 480
-#    rotation: 270    #uncomment for placement with down-facing USB socket
     spi_mode: MODE3
     data_rate: 2MHz
     color_order: RGB
@@ -101,11 +100,13 @@ display:
         - 7 #b4
         - 15 #b5
 
+# For placement with down-facing USB socket uncomment this. With LVGL the
+# rotation goes here, not in display:, and it rotates the touch input too.
+#lvgl:
+#  rotation: 270
+
 touchscreen:
   - platform: gt911
-#    transform:     #uncomment for placement with down-facing USB socket
-#      swap_xy: true
-#      mirror_x: true
     id: my_touch
     display: my_display
     on_release:

@@ -34,8 +34,7 @@ obj:
           - range_from: 0
             range_to: ${max_range}
             angle_range: 200
-            ticks:
-              count: 0
+            # needle-only scale: without a ticks: block LVGL draws no ticks
             indicators:
               - line:
                   id: ${id_needle}

@@ -555,7 +555,9 @@ binary_sensor:
     name: ${friendly_name_evse} Reset button
     icon: mdi:restart
     filters:
-      - settle: 99ms
+      # Require a stable level: settle passed the first edge through, so an EMI
+      # spike from the contactor switching could register as a click.
+      - delayed_on_off: 50ms
     on_press:
       - logger.log: "Pressed button, light on"
       - light.turn_on:
